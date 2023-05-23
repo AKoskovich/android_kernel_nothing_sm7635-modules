@@ -2107,8 +2107,9 @@ struct sde_perf_cfg {
  * @max_dsc_width       max dsc line width
  * @max_mixer_width     max layer mixer line width
  * @max_mixer_blendstages       max layer mixer blend stages (z orders)
- * @max_cwb             max number of dcwb/cwb supported
+ * @max_cwb             max number of cwb supported
  * @max_bw_upvote_threshold_ns bandwidth upvote threshold with cesta/rscc
+ * @ddr_list_index      index of supported ddr type
  * @vbif_qos_nlvl       number of vbif QoS priority levels
  * @qos_target_time_ns  normalized qos target time for line-based qos
  * @macrotile_mode      UBWC parameter for macro tile channel distribution
@@ -2280,6 +2281,7 @@ struct sde_mdss_cfg {
 	u32 ppb_buf_max_lines;
 	u32 controlled_SR;
 	u32 early_EPT_handling;
+	u32 ddr_list_index;
 };
 
 struct sde_mdss_hw_cfg_handler {
