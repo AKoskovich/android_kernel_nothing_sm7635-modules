@@ -20,7 +20,6 @@ KBUILD_OPTIONS := VIDEO_ROOT=$(VIDEO_BLD_DIR)
 KBUILD_OPTIONS += $(VIDEO_SELECT)
 
 KBUILD_OPTIONS += KBUILD_EXTRA_SYMBOLS=$(shell pwd)/$(call intermediates-dir-for,DLKM,mmrm-module-symvers)/Module.symvers
-KBUILD_OPTIONS += KBUILD_EXTRA_SYMBOLS+=$(shell pwd)/$(call intermediates-dir-for,DLKM,hw-fence-module-symvers)/Module.symvers
 ###########################################################
 
 DLKM_DIR   := device/qcom/common/dlkm
@@ -43,9 +42,7 @@ endif
 LOCAL_MODULE_KO_DIRS      := msm_video/msm_video.ko
 
 LOCAL_REQUIRED_MODULES    := mmrm-module-symvers
-LOCAL_REQUIRED_MODULES    += hw-fence-module-symvers
 LOCAL_ADDITIONAL_DEPENDENCIES := $(call intermediates-dir-for,DLKM,mmrm-module-symvers)/Module.symvers
-LOCAL_ADDITIONAL_DEPENDENCIES += $(call intermediates-dir-for,DLKM,hw-fence-module-symvers)/Module.symvers
 
 include $(DLKM_DIR)/Build_external_kernelmodule.mk
 endif

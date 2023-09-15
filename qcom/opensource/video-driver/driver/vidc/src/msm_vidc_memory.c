@@ -386,7 +386,8 @@ static int msm_vidc_memory_alloc_map(struct msm_vidc_core *core, struct msm_vidc
 
 	cb = msm_vidc_get_context_bank_for_region(core, mem->region);
 	if (!cb) {
-		d_vpr_e("%s: failed to get context bank device\n", __func__);
+		d_vpr_e("%s: Failed to get context bank device\n",
+			 __func__);
 		return -EIO;
 	}
 
@@ -417,114 +418,22 @@ static int msm_vidc_memory_unmap_free(struct msm_vidc_core *core, struct msm_vid
 
 	d_vpr_h(
 		"%s: dmabuf 0x%llx, size %d, kvaddr %pK, buffer_type %s, secure %d, region %d\n",
-		__func__, mem->device_addr, mem->size, mem->kvaddr,
-		buf_name(mem->type), mem->secure, mem->region);
+		__func__, mem->device_addr, mem->size, mem->kvaddr, buf_name(mem->type),
+		mem->secure, mem->region);
 
 	cb = msm_vidc_get_context_bank_for_region(core, mem->region);
 	if (!cb) {
-		d_vpr_e("%s: failed to get context bank device\n", __func__);
+		d_vpr_e("%s: Failed to get context bank device\n",
+			 __func__);
 		return -EIO;
 	}
 
 	dma_free_attrs(cb->dev, mem->size, mem->kvaddr, mem->device_addr,
-		mem->attrs);
+		       mem->attrs);
 
 	mem->kvaddr = NULL;
 	mem->device_addr = 0;
 
-	return rc;
-}
-
-static int msm_vidc_dma_map_page(struct msm_vidc_core *core,
-	struct msm_vidc_mem *mem)
-{
-	int rc = 0;
-	struct context_bank_info *cb = NULL;
-	dma_addr_t dma_addr;
-
-	if (!mem) {
-		d_vpr_e("%s: invalid params\n", __func__);
-		return -EINVAL;
-	}
-
-	if (mem->refcount) {
-		mem->refcount++;
-		goto exit;
-	}
-
-	cb = msm_vidc_get_context_bank_for_region(core, mem->region);
-	if (!cb) {
-		d_vpr_e("%s: Failed to get context bank device\n",
-			__func__);
-		rc = -EIO;
-		goto error;
-	}
-
-	/* map and obtain dma address for physically contiguous memory */
-	dma_addr = dma_map_page(cb->dev, phys_to_page(mem->phys_addr),
-		0, (size_t)mem->size, mem->direction);
-
-	rc = dma_mapping_error(cb->dev, dma_addr);
-	if (rc) {
-		d_vpr_e("%s: Failed to map memory\n", __func__);
-		goto error;
-	}
-
-	mem->device_addr = dma_addr;
-	mem->refcount++;
-
-exit:
-	d_vpr_l(
-		"%s: type %11s, device_addr %#llx, size %u region %d, refcount %d\n",
-		__func__, buf_name(mem->type), mem->device_addr,
-		mem->size, mem->region, mem->refcount);
-
-	return 0;
-
-error:
-	return rc;
-}
-
-static int msm_vidc_dma_unmap_page(struct msm_vidc_core *core,
-	struct msm_vidc_mem *mem)
-{
-	int rc = 0;
-	struct context_bank_info *cb = NULL;
-
-	if (!mem) {
-		d_vpr_e("%s: invalid params\n", __func__);
-		return -EINVAL;
-	}
-
-	if (mem->refcount) {
-		mem->refcount--;
-	} else {
-		d_vpr_e("unmap called while refcount is zero already\n");
-		return -EINVAL;
-	}
-
-	cb = msm_vidc_get_context_bank_for_region(core, mem->region);
-	if (!cb) {
-		d_vpr_e("%s: Failed to get context bank device\n",
-			__func__);
-		rc = -EIO;
-		goto exit;
-	}
-
-	d_vpr_l(
-		"%s: type %11s, device_addr %#x, refcount %d, region %d\n",
-		__func__, buf_name(mem->type), mem->device_addr,
-		mem->refcount, mem->region);
-
-	if (mem->refcount)
-		goto exit;
-
-	dma_unmap_page(cb->dev, (dma_addr_t)(mem->device_addr),
-		mem->size, mem->direction);
-
-	mem->device_addr = 0x0;
-
-exit:
 	return rc;
 }
 
@@ -546,8 +455,7 @@ static int msm_vidc_iommu_map(struct msm_vidc_core *core, struct msm_vidc_mem *m
 
 	cb = msm_vidc_get_context_bank_for_region(core, mem->region);
 	if (!cb) {
-		d_vpr_e("%s: failed to get context bank device for region: %d\n",
-			__func__, mem->region);
+		d_vpr_e("%s: Failed to get context bank device\n", __func__);
 		return -EIO;
 	}
 
@@ -577,8 +485,8 @@ static int msm_vidc_iommu_unmap(struct msm_vidc_core *core, struct msm_vidc_mem 
 
 	cb = msm_vidc_get_context_bank_for_region(core, mem->region);
 	if (!cb) {
-		d_vpr_e("%s: failed to get context bank device for region: %d\n",
-			__func__, mem->region);
+		d_vpr_e("%s: Failed to get context bank device\n",
+			__func__);
 		return -EIO;
 	}
 
@@ -593,7 +501,7 @@ static int msm_vidc_iommu_unmap(struct msm_vidc_core *core, struct msm_vidc_mem 
 	return rc;
 }
 
-static const struct msm_vidc_memory_ops msm_mem_ops = {
+static struct msm_vidc_memory_ops msm_mem_ops = {
 	.dma_buf_get                    = msm_vidc_dma_buf_get,
 	.dma_buf_put                    = msm_vidc_dma_buf_put,
 	.dma_buf_put_completely         = msm_vidc_dma_buf_put_completely,
@@ -603,14 +511,12 @@ static const struct msm_vidc_memory_ops msm_mem_ops = {
 	.dma_buf_unmap_attachment       = msm_vidc_dma_buf_unmap_attachment,
 	.memory_alloc_map               = msm_vidc_memory_alloc_map,
 	.memory_unmap_free              = msm_vidc_memory_unmap_free,
-	.mem_dma_map_page               = msm_vidc_dma_map_page,
-	.mem_dma_unmap_page             = msm_vidc_dma_unmap_page,
 	.buffer_region                  = msm_vidc_buffer_region,
 	.iommu_map                      = msm_vidc_iommu_map,
 	.iommu_unmap                    = msm_vidc_iommu_unmap,
 };
 
-const struct msm_vidc_memory_ops *get_mem_ops(void)
+struct msm_vidc_memory_ops *get_mem_ops(void)
 {
 	return &msm_mem_ops;
 }
