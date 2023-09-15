@@ -643,7 +643,6 @@ enum msm_vidc_core_capability_type {
 	ENC_AUTO_FRAMERATE,
 	DEVICE_CAPS,
 	SUPPORTS_REQUESTS,
-	SUPPORTS_SYNX_FENCE,
 	SSR_TYPE,
 	CORE_CAP_MAX,
 };
@@ -926,8 +925,6 @@ struct msm_vidc_fence {
 	spinlock_t                  lock;
 	struct sync_file            *sync_file;
 	int                         fd;
-	u64                         fence_id;
-	void                        *session;
 };
 
 struct msm_vidc_mem {
@@ -954,7 +951,6 @@ struct msm_vidc_mem {
 	struct sg_table            *table;
 	struct dma_buf_attachment  *attach;
 	phys_addr_t                 phys_addr;
-	enum dma_data_direction     direction;
 };
 
 struct msm_vidc_mem_list {

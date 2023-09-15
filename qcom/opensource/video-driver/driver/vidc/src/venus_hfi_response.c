@@ -766,75 +766,6 @@ static int handle_input_buffer(struct msm_vidc_inst *inst,
 	return rc;
 }
 
-static int msm_vidc_handle_fence_signal(struct msm_vidc_inst *inst,
-					struct msm_vidc_buffer *buf)
-{
-	int rc = 0;
-	bool signal_error = false;
-	struct msm_vidc_core *core = inst->core;
-
-	if (inst->capabilities[OUTBUF_FENCE_TYPE].value ==
-		MSM_VIDC_FENCE_NONE)
-		return 0;
-
-	if (is_meta_rx_inp_enabled(inst, META_OUTBUF_FENCE)) {
-		if (!inst->hfi_frame_info.fence_id) {
-			i_vpr_e(inst,
-				"%s: fence id is not received although fencing is enabled\n",
-				__func__);
-			return -EINVAL;
-		}
-	} else {
-		if (!inst->hfi_frame_info.fence_id) {
-			return 0;
-		}
-		i_vpr_e(inst,
-			"%s: fence id: %d is received although fencing is not enabled\n",
-			__func__, inst->hfi_frame_info.fence_id);
-		signal_error = true;
-		goto signal;
-	}
-
-	if (inst->capabilities[OUTBUF_FENCE_TYPE].value ==
-		MSM_VIDC_SYNX_V2_FENCE) {
-		if (inst->hfi_frame_info.fence_error)
-			signal_error = true;
-	} else if (inst->capabilities[OUTBUF_FENCE_TYPE].value ==
-		MSM_VIDC_SW_FENCE) {
-		if (!buf->data_size)
-			signal_error = true;
-
-		if (inst->hfi_frame_info.fence_error)
-			i_vpr_e(inst,
-				"%s: fence error info received for SW fence\n",
-				__func__);
-	} else {
-		i_vpr_e(inst, "%s: invalid fence type\n", __func__);
-		return -EINVAL;
-	}
-
-signal:
-	/* fence signalling */
-	if (signal_error) {
-		/* signal fence error */
-		i_vpr_l(inst,
-			"%s: signalling fence error for buf idx %d daddr %#llx\n",
-			__func__, buf->index, buf->device_addr);
-		call_fence_op(core, fence_destroy, inst,
-			      inst->hfi_frame_info.fence_id);
-	} else {
-		/* signal fence success*/
-		rc = call_fence_op(core, fence_signal, inst,
-				   inst->hfi_frame_info.fence_id);
-		if (rc) {
-			i_vpr_e(inst, "%s: failed to signal fence\n", __func__);
-			return -EINVAL;
-		}
-	}
-
-	return 0;
-}
-
 static int handle_output_buffer(struct msm_vidc_inst *inst,
 				struct hfi_buffer *buffer)
 {
@@ -970,9 +901,18 @@ static int handle_output_buffer(struct msm_vidc_inst *inst,
 	buf->flags = 0;
 	buf->flags = get_driver_buffer_flags(inst, buffer->flags);
 
-	rc = msm_vidc_handle_fence_signal(inst, buf);
-	if (rc)
-		msm_vidc_change_state(inst, MSM_VIDC_ERROR, __func__);
+	/* fence signalling */
+	if (inst->hfi_frame_info.fence_id) {
+		if (buf->data_size) {
+			/* signal fence */
+			msm_vidc_fence_signal(inst,
+				inst->hfi_frame_info.fence_id);
+		} else {
+			/* destroy fence */
+			msm_vidc_fence_destroy(inst,
+				inst->hfi_frame_info.fence_id);
+		}
+	}
 
 	if (is_decode_session(inst)) {
 		inst->power.fw_cr = inst->hfi_frame_info.cr;

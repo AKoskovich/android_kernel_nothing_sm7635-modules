@@ -382,7 +382,7 @@ int hfi_packet_sys_init(struct msm_vidc_core *core,
 {
 	int rc = 0;
 	u32 payload = 0;
-	u32 synx_client_data[2];
+	//u32 synx_client_data[2];
 
 	rc = hfi_create_header(pkt, pkt_size,
 			       0 /*session_id*/,
@@ -505,7 +505,7 @@ int hfi_packet_sys_init(struct msm_vidc_core *core,
 	if (rc)
 		goto err_sys_init;
 
-	/* HFI_PROP_FENCE_CLIENT_DATA */
+	/* HFI_PROP_FENCE_CLIENT_DATA
 	if (core->capabilities[SUPPORTS_SYNX_FENCE].value) {
 		synx_client_data[0] = core->synx_fence_data.client_id;
 		synx_client_data[1] = core->synx_fence_data.client_flags;
@@ -522,6 +522,7 @@ int hfi_packet_sys_init(struct msm_vidc_core *core,
 		if (rc)
 			goto err_sys_init;
 	}
+	*/
 
 	d_vpr_h("System init packet created\n");
 	return rc;
