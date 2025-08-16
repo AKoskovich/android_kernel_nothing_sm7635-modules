@@ -5184,6 +5184,7 @@ int dsi_panel_enable(struct dsi_panel *panel)
 	}
 	panel->panel_initialized = true;
 	panel->update_init_gamma = false;
+	panel->last_refresh_rate = 120;
 error:
 	mutex_unlock(&panel->panel_lock);
 	return rc;

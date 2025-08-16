@@ -1047,6 +1047,8 @@ static void _sde_connector_update_fps_gamma(struct dsi_display *display)
 	}
 
 	if (display->config.panel_mode == DSI_OP_VIDEO_MODE) {
+		if(display->panel->cur_mode->timing.refresh_rate == 30)
+			return;
 		send_refreshrate_cmd(display->panel, display->panel->cur_mode->timing.refresh_rate);
 		DSI_INFO("set refreshrate refresh_rate=%d\n", display->panel->cur_mode->timing.refresh_rate);
 	}

@@ -278,7 +278,7 @@ int dsi_display_set_backlight(struct drm_connector *connector,
 
 	//lp = sde_connector_get_lp(connector);
 	//if (lp == SDE_MODE_DPMS_LP1){
-	if (30 == panel->cur_mode->timing.refresh_rate) {
+	if (30 == panel->cur_mode->timing.refresh_rate && panel->update_init_gamma) {
 		if (!strcmp(panel->name, "rm69220 amoled vid mode dsi visionox panel with DSC")) {
 			if (bl_temp >= 1000)
 				bl_temp = 4094;
@@ -1381,14 +1381,18 @@ int dsi_display_set_power(struct drm_connector *connector,
 	}
 
 	if (display->panel->panel_mode == DSI_OP_VIDEO_MODE) {
-		if ((power_mode == SDE_MODE_DPMS_LP1) && (display->dsi_stay_awake == false)) {
-			DSI_INFO("dsi display stay awak\n");
-			__pm_stay_awake(display->wk_lock);
-			display->dsi_stay_awake = true;
-		} else if (display->dsi_stay_awake == true) {
-			DSI_INFO("dsi display relax\n");
-			__pm_relax(display->wk_lock);
-			display->dsi_stay_awake = false;
+		if (power_mode == SDE_MODE_DPMS_LP1) {
+			if (display->dsi_stay_awake == false) {
+				DSI_INFO("dsi display stay awak\n");
+				__pm_stay_awake(display->wk_lock);
+				display->dsi_stay_awake = true;
+			}
+		} else {
+			if ((display->dsi_stay_awake == true) && (!display->panel->doze_recoverying)) {
+				DSI_INFO("dsi display relax\n");
+				__pm_relax(display->wk_lock);
+				display->dsi_stay_awake = false;
+			}
 		}
 	}
 
