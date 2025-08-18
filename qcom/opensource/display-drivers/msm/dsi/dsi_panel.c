@@ -1879,6 +1879,30 @@ static int dsi_panel_parse_dyn_clk_caps(struct dsi_panel *panel)
 	return 0;
 }
 
+static void dsi_panel_parse_dfps_porches(struct dsi_parser_utils *utils,
+	u32 **dfps_porch_list, const char *porch_type, u32 dfps_list_len) {
+	int rc = 0;
+
+	*dfps_porch_list = kcalloc(dfps_list_len, sizeof(u32), GFP_KERNEL);
+	if (!*dfps_porch_list) {
+		rc = -ENOMEM;
+		DSI_ERR("[%s] dfps porch list parse failed, rc = %d\n", porch_type, rc);
+	}
+
+	rc = utils->read_u32_array(utils->data, porch_type,
+			*dfps_porch_list, dfps_list_len);
+	if (rc) {
+		rc = -EINVAL;
+		DSI_ERR("[%s] dfps porch list parse failed, rc = %d\n", porch_type, rc);
+	}
+
+	DSI_INFO("[%s]: ", porch_type);
+	for (int i = 0; i < dfps_list_len; ++i)
+	{
+		DSI_INFO("[%d] ", (*dfps_porch_list)[i]);
+	}
+}
+
 static int dsi_panel_parse_dfps_caps(struct dsi_panel *panel)
 {
 	int rc = 0;
@@ -1912,6 +1936,8 @@ static int dsi_panel_parse_dfps_caps(struct dsi_panel *panel)
 		dfps_caps->type = DSI_DFPS_IMMEDIATE_HFP;
 	} else if (!strcmp(type, "dfps_immediate_porch_mode_vfp")) {
 		dfps_caps->type = DSI_DFPS_IMMEDIATE_VFP;
+	} else if (!strcmp(type, "dfps_immediate_porch_mode_both_hv_porch")) {
+		dfps_caps->type = DSI_DFPS_IMMEDIATE_HV_P;
 	} else {
 		DSI_ERR("[%s] dfps type is not recognized\n", name);
 		rc = -EINVAL;
@@ -1942,6 +1968,22 @@ static int dsi_panel_parse_dfps_caps(struct dsi_panel *panel)
 		rc = -EINVAL;
 		goto error;
 	}
+
+	if (dfps_caps->type == DSI_DFPS_IMMEDIATE_HV_P) {
+		dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_hfp_list, "qcom,dsi-dfps-hfp-list",
+			dfps_caps->dfps_list_len);
+		dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_hbp_list, "qcom,dsi-dfps-hbp-list",
+			dfps_caps->dfps_list_len);
+		dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_hpw_list, "qcom,dsi-dfps-hpw-list",
+			dfps_caps->dfps_list_len);
+		dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_vbp_list, "qcom,dsi-dfps-vbp-list",
+			dfps_caps->dfps_list_len);
+		dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_vfp_list, "qcom,dsi-dfps-vfp-list",
+			dfps_caps->dfps_list_len);
+		dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_vpw_list, "qcom,dsi-dfps-vpw-list",
+			dfps_caps->dfps_list_len);
+	}
+
 	dfps_caps->dfps_support = true;
 
 	/* calculate max and min fps */
