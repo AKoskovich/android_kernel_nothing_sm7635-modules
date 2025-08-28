@@ -295,6 +295,8 @@ enum dsi_dyn_clk_feature_type {
  * @DSI_CMD_SET_STICKY_ON_FLY:             Still indication enable for only one frame
  * @DSI_CMD_SET_TRIGGER_SELF_REFRESH:      Trigger self refresh from Gram
  * @DSI_CMD_SET_FPS_SWITCH:		   FPS Switch
+ * @DSI_CMD_SET_LHBM_ON                    Local high brightness mode on
+ * @DSI_CMD_SET_LHBM_OFF                   Local high brightness mode off
  * @DSI_CMD_SET_MAX
  */
 enum dsi_cmd_set_type {
@@ -339,6 +341,8 @@ enum dsi_cmd_set_type {
 	DSI_CMD_SET_STICKY_ON_FLY,
 	DSI_CMD_SET_TRIGGER_SELF_REFRESH,
 	DSI_CMD_SET_FPS_SWITCH,
+	DSI_CMD_SET_LHBM_ON,
+	DSI_CMD_SET_LHBM_OFF,
 	DSI_CMD_SET_MAX
 };
 

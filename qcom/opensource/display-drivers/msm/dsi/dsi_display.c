@@ -11,6 +11,7 @@
 #include <linux/version.h>
 #include <linux/ktime.h>
 #include <linux/pinctrl/qcom-pinctrl.h>
+#include <linux/soc/qcom/nt_display_notifier.h>
 
 #include "msm_drv.h"
 #include "sde_connector.h"
@@ -8934,6 +8935,40 @@ static int dsi_display_qsync(struct dsi_display *display, bool enable)
 exit:
 	display->queue_cmd_waits = false;
 	SDE_EVT32(enable, display->panel->qsync_caps.qsync_min_fps, rc);
+	mutex_unlock(&display->display_lock);
+	return rc;
+}
+
+int dsi_display_lhbm_enable(struct dsi_display *display, bool enable)
+{
+	int i;
+	int rc = 0;
+
+	mutex_lock(&display->display_lock);
+	display->queue_cmd_waits = true;
+
+	display_for_each_ctrl(i, display) {
+		if (enable) {
+			/* send the commands to enable lhbm */
+			rc = dsi_panel_send_lhbm_on_dcs(display->panel, i);
+			if (rc) {
+				DSI_ERR("fail lhbm ON cmds rc:%d\n", rc);
+				goto exit;
+			}
+		} else {
+			/* send the commands to enable lhbm */
+			rc = dsi_panel_send_lhbm_off_dcs(display->panel, i);
+			if (rc) {
+				DSI_ERR("fail lhbm OFF cmds rc:%d\n", rc);
+				goto exit;
+			}
+		}
+
+		nt_display_update_lhbm_state(enable);
+	}
+
+exit:
+	display->queue_cmd_waits = false;
 	mutex_unlock(&display->display_lock);
 	return rc;
 }

@@ -460,4 +460,8 @@ int dsi_panel_send_cmd(struct dsi_panel *panel,
 
 int dsi_panel_parse_freq_step_table(struct dsi_display_mode *mode,
 				struct dsi_parser_utils *utils);
+
+int dsi_panel_send_lhbm_on_dcs(struct dsi_panel *panel, int ctrl_idx);
+
+int dsi_panel_send_lhbm_off_dcs(struct dsi_panel *panel, int ctrl_idx);
 #endif /* _DSI_PANEL_H_ */

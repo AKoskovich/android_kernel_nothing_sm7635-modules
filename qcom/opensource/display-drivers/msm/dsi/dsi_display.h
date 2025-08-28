@@ -1002,4 +1002,11 @@ int dsi_display_get_clk_rate(void *display, u32 idx, u32 clk_type, u64 *clk_rate
  */
 void dsi_display_set_idle_pc_state(void *display, bool idle_pc);
 
+/**
+ * dsi_display_lhbm_enable() - set local high brightness
+ * @display:    Handle to display
+ * @enable:     Whether to enable/disable
+ */
+int dsi_display_lhbm_enable(struct dsi_display *display, bool enable);
+
 #endif /* _DSI_DISPLAY_H_ */
