@@ -27,6 +27,11 @@
 #define BL_NODE_NAME_SIZE 32
 #define HDR10_PLUS_VSIF_TYPE_CODE      0x81
 
+static struct kobject *k_obj = NULL;
+int panel_feature_node_exist = 0;
+struct sde_connector *panel_feature_sde_conn;
+unsigned long fp_status = 0;
+
 /* Autorefresh will occur after FRAME_CNT frames. Large values are unlikely */
 #define AUTOREFRESH_MAX_FRAME_CNT 6
 
@@ -502,6 +507,7 @@ static int sde_backlight_setup(struct sde_connector *c_conn,
 				    PTR_ERR(c_conn->cdev));
 		c_conn->cdev = NULL;
 	}
+	panel_feature_sde_conn = c_conn;
 done:
 	display_count++;
 
@@ -1349,6 +1355,34 @@ static int _sde_connector_update_dirty_properties(
 	return 0;
 }
 
+static int _sde_connector_update_lhbm_state(struct sde_connector *c_conn, bool enable)
+{
+	struct dsi_display *dsi_display;
+	int rc = 0;
+
+	if (!c_conn) {
+		SDE_ERROR("Invalid params sde_connector null\n");
+		return -EINVAL;
+	}
+
+	dsi_display = _sde_connector_get_display(c_conn);
+	if (!dsi_display)
+		return 0;
+
+	if (!dsi_display || !dsi_display->panel) {
+		SDE_ERROR("Invalid params(s) dsi_display %pK, panel %pK\n",
+			dsi_display,
+			((dsi_display) ? dsi_display->panel : NULL));
+		return -EINVAL;
+	}
+
+	rc = dsi_display_lhbm_enable(dsi_display, enable);
+	if (rc)
+		SDE_ERROR("Failed to enable/disable lhbm\n");
+
+	return rc;
+};
+
 struct sde_connector_dyn_hdr_metadata *sde_connector_get_dyn_hdr_meta(
 		struct drm_connector *connector)
 {
@@ -1501,7 +1535,8 @@ int sde_connector_pre_kickoff(struct drm_connector *connector)
 	if (msm_is_mode_seamless_vrr(&c_state->msm_mode) &&
 			c_conn->ops.check_cmd_defined(c_conn->display,
 			DSI_CMD_SET_FPS_SWITCH) &&
-			!c_conn->vrr_caps.video_psr_support) {
+			!c_conn->vrr_caps.video_psr_support &&
+			!fp_status) {
 		rc = sde_connector_update_cmd(connector, BIT(DSI_CMD_SET_FPS_SWITCH), true);
 		if (rc)
 			SDE_EVT32(connector->base.id, SDE_EVTLOG_ERROR);
@@ -3220,6 +3255,60 @@ static const struct file_operations conn_cmd_rx_fops = {
 	.write =        _sde_debugfs_conn_cmd_rx_write,
 };
 
+static ssize_t store_fp_status(struct kobject *kobj,struct kobj_attribute *attr,const char *buf, size_t size)
+{
+	int rc = 0;
+	int mode = 0;
+	unsigned long val;
+	struct sde_connector *sde_conn = panel_feature_sde_conn;
+
+	rc = kstrtoul(buf, 0, &val);
+
+	fp_status = val;
+
+	mutex_lock(&sde_conn->lock);
+	mode = sde_conn->dpms_mode;
+	mutex_unlock(&sde_conn->lock);
+
+	if (mode != DRM_MODE_DPMS_OFF) {
+		bool enable = (val != 0);
+		rc = _sde_connector_update_lhbm_state(sde_conn, enable);
+		if (rc)
+			SDE_ERROR("panel_feature: _sde_connector_update_lhbm_state(%d) -> %d\n",
+				 enable, rc);
+	}
+
+	return size;
+};
+
+static ssize_t show_fp_status(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%lu\n", fp_status);
+};
+
+static struct kobj_attribute fp_status_attribute = __ATTR(fp_status, S_IRUGO | S_IWUSR, show_fp_status, store_fp_status);
+
+static struct attribute *panel_feature_attributes[] = {
+	&fp_status_attribute.attr,
+	NULL,
+};
+
+static const struct attribute_group panel_feature_attr_group = {
+	.attrs = panel_feature_attributes,
+};
+
+static int sde_connector_init_panel_feature(struct drm_connector *connector)
+{
+	if (!panel_feature_node_exist) {
+		k_obj = kobject_create_and_add("panel_feature", NULL);
+		if (sysfs_create_group(k_obj, &panel_feature_attr_group))
+			pr_err("panel_feature_attr_group error!\n");
+		panel_feature_node_exist = 1;
+	}
+
+	return 0;
+};
+
 #if IS_ENABLED(CONFIG_DEBUG_FS)
 /**
  * sde_connector_init_debugfs - initialize connector debugfs
@@ -3290,7 +3379,17 @@ static int sde_connector_init_debugfs(struct drm_connector *connector)
 
 static int sde_connector_late_register(struct drm_connector *connector)
 {
-	return sde_connector_init_debugfs(connector);
+	int rc = 0;
+
+	rc = sde_connector_init_panel_feature(connector);
+	if (rc)
+		SDE_ERROR("panel_feature init failed, rc=%d\n", rc);
+
+	rc = sde_connector_init_debugfs(connector);
+	if (rc)
+		SDE_ERROR("debugfs init failed, rc=%d\n", rc);
+
+	return rc;
 }
 
 static void sde_connector_early_unregister(struct drm_connector *connector)
