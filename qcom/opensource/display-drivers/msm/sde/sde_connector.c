@@ -3255,6 +3255,119 @@ static const struct file_operations conn_cmd_rx_fops = {
 	.write =        _sde_debugfs_conn_cmd_rx_write,
 };
 
+ssize_t nt_rx_cmd(struct sde_connector *c_conn, const char *buf, size_t count)
+{
+	char *input, *token, *input_copy, *input_dup = NULL;
+	const char *delim = " ";
+	unsigned char buffer[MAX_CMD_PAYLOAD_SIZE] = {0};
+	int rc = 0, strtoint = 0;
+	u32 buf_size = 0;
+
+	if (!c_conn->ops.cmd_receive) {
+		SDE_ERROR("no cmd receive support for connector name %s\n",
+				c_conn->name);
+		return -EINVAL;
+	}
+
+	memset(c_conn->cmd_rx_buf, 0x0, MAX_CMD_RECEIVE_SIZE);
+	c_conn->rx_len = 0;
+
+	input = kzalloc(count + 1, GFP_KERNEL);
+	if (!input)
+		return -ENOMEM;
+
+	strncpy(input, buf, count);
+	input[count] = '\0';
+
+	SDE_INFO("Command requested for rx from panel: %s\n", input);
+
+	input_copy = kstrdup(input, GFP_KERNEL);
+	if (!input_copy) {
+		rc = -ENOMEM;
+		goto end;
+	}
+
+	input_dup = input_copy;
+	token = strsep(&input_copy, delim);
+	while (token) {
+		rc = kstrtoint(token, 0, &strtoint);
+		if (rc) {
+			SDE_ERROR("input buffer conversion failed\n");
+			goto end1;
+		}
+
+		buffer[buf_size++] = (strtoint & 0xff);
+		if (buf_size >= MAX_CMD_PAYLOAD_SIZE) {
+			SDE_ERROR("buffer size = %d exceeding the limit %d\n",
+					buf_size, MAX_CMD_PAYLOAD_SIZE);
+			rc = -EFAULT;
+			goto end1;
+		}
+		token = strsep(&input_copy, delim);
+	}
+
+	if (!buffer[0] || buffer[0] > MAX_CMD_RECEIVE_SIZE) {
+		SDE_ERROR("invalid rx length\n");
+		rc = -EFAULT;
+		goto end1;
+	}
+
+	SDE_DEBUG("command packet size in bytes: %u, rx len: %u\n",
+			buf_size, buffer[0]);
+	if (!buf_size) {
+		rc = -EFAULT;
+		goto end1;
+	}
+
+	mutex_lock(&c_conn->lock);
+	c_conn->rx_len = c_conn->ops.cmd_receive(c_conn->display, buffer + 1,
+			buf_size - 1, c_conn->cmd_rx_buf, buffer[0], NULL);
+	mutex_unlock(&c_conn->lock);
+
+	if (c_conn->rx_len <= 0)
+		rc = -EINVAL;
+	else
+		rc = 0;
+end1:
+	kfree(input_dup);
+end:
+	kfree(input);
+	return rc;
+}
+
+static ssize_t panel_id1_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	const char *read_id_cmd = "0x01 0x06 0x01 0x00 0x01 0x00 0x00 0x01 0xDA";
+	struct sde_connector *sde_conn = panel_feature_sde_conn;
+	int code_len = 44;
+
+	nt_rx_cmd(sde_conn, read_id_cmd, code_len);
+
+	return sprintf(buf, "%.2x\n", sde_conn->cmd_rx_buf[0]);
+}
+
+static ssize_t panel_id2_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	const char *read_id_cmd = "0x01 0x06 0x01 0x00 0x01 0x00 0x00 0x01 0xDB";
+	struct sde_connector *sde_conn = panel_feature_sde_conn;
+	int code_len = 44;
+
+	nt_rx_cmd(sde_conn, read_id_cmd, code_len);
+
+	return sprintf(buf, "%.2x\n", sde_conn->cmd_rx_buf[0]);
+}
+
+static ssize_t panel_id3_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	const char *read_id_cmd = "0x01 0x06 0x01 0x00 0x01 0x00 0x00 0x01 0xDC";
+	struct sde_connector *sde_conn = panel_feature_sde_conn;
+	int code_len = 44;
+
+	nt_rx_cmd(sde_conn, read_id_cmd, code_len);
+
+	return sprintf(buf, "%.2x\n", sde_conn->cmd_rx_buf[0]);
+}
+
 static ssize_t store_fp_status(struct kobject *kobj,struct kobj_attribute *attr,const char *buf, size_t size)
 {
 	int rc = 0;
@@ -3286,9 +3399,15 @@ static ssize_t show_fp_status(struct kobject *kobj, struct kobj_attribute *attr,
 	return sprintf(buf, "%lu\n", fp_status);
 };
 
+static struct kobj_attribute panel_id1_attribute = __ATTR(panel_id1, S_IRUGO | S_IWUSR, panel_id1_show, NULL);
+static struct kobj_attribute panel_id2_attribute = __ATTR(panel_id2, S_IRUGO | S_IWUSR, panel_id2_show, NULL);
+static struct kobj_attribute panel_id3_attribute = __ATTR(panel_id3, S_IRUGO | S_IWUSR, panel_id3_show, NULL);
 static struct kobj_attribute fp_status_attribute = __ATTR(fp_status, S_IRUGO | S_IWUSR, show_fp_status, store_fp_status);
 
 static struct attribute *panel_feature_attributes[] = {
+	&panel_id1_attribute.attr,
+	&panel_id2_attribute.attr,
+	&panel_id3_attribute.attr,
 	&fp_status_attribute.attr,
 	NULL,
 };
