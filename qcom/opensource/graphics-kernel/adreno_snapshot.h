@@ -6,13 +6,12 @@
 #ifndef __ADRENO_SNAPSHOT_H
 #define __ADRENO_SNAPSHOT_H
 
-#include "adreno_hwsched_snapshot.h"
 #include "kgsl_snapshot.h"
 
-/* Number of dwords to dump in snapshot for CP SQE */
-#define SQE_FW_SNAPSHOT_DWORDS 5
-
 #define CP_CRASH_DUMPER_TIMEOUT 500
+
+#define DEBUG_SECTION_SZ(_dwords) (((_dwords) * sizeof(unsigned int)) \
+		+ sizeof(struct kgsl_snapshot_debug))
 
 #define SHADER_SECTION_SZ(_dwords) (((_dwords) * sizeof(unsigned int)) \
 		+ sizeof(struct kgsl_snapshot_shader))
@@ -148,39 +147,5 @@ size_t adreno_snapshot_global(struct kgsl_device *device, u8 *buf,
 void adreno_snapshot_dump_all_ibs(struct kgsl_device *device,
 			unsigned int *rbptr,
 			struct kgsl_snapshot *snapshot);
-
-/**
- * adreno_snapshot_gmu_version - To dump gmu version info to snapshot buffer
- * @device: Pointer to the kgsl device
- * @buf: Destination snapshot buffer
- * @remain: Remaining size of the snapshot buffer
- * @priv: Opaque handle
- *
- * Return: Number of bytes written to snapshot buffer
- */
-size_t adreno_snapshot_gmu_version(struct kgsl_device *device,
-		u8 *buf, size_t remain, void *priv);
-
-/**
- * kgsl_snapshot_gmu_mem - Snapshot a GMU memory descriptor
- * @device: Pointer to the kgsl device
- * @buf: Destination snapshot buffer
- * @remain: Remaining size of the snapshot buffer
- * @priv: Opaque handle
- *
- * Return: Number of bytes written to snapshot buffer
- */
-size_t adreno_snapshot_gmu_mem(struct kgsl_device *device,
-	u8 *buf, size_t remain, void *priv);
-
-/**
- * adreno_snapshot_preemption_record - To dump preemption related buffers
- * @device: Pointer to the kgsl device
- * @snapshot: Pointer to the snapshot structure
- *
- * Snapshot the preemption related buffers .
- */
-void adreno_snapshot_preemption_record(struct kgsl_device *device,
-		struct kgsl_snapshot *snapshot);
 
 #endif /*__ADRENO_SNAPSHOT_H */

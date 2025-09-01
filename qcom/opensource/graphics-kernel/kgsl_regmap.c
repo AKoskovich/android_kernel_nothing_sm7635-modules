@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/io.h>
@@ -84,7 +84,7 @@ int kgsl_regmap_add_region(struct kgsl_regmap *regmap, struct platform_device *p
 	return ret;
 }
 
-#define kgsl_regmap_in_range(a, base, len) \
+#define in_range(a, base, len) \
 	(((a) >= (base)) && ((a) < ((base) + (len))))
 
 struct kgsl_regmap_region *kgsl_regmap_get_region(struct kgsl_regmap *regmap,
@@ -95,7 +95,7 @@ struct kgsl_regmap_region *kgsl_regmap_get_region(struct kgsl_regmap *regmap,
 	for (i = 0; i < regmap->count; i++) {
 		struct kgsl_regmap_region *region = &regmap->region[i];
 
-		if (kgsl_regmap_in_range(offset, region->offset, region->size))
+		if (in_range(offset, region->offset, region->size))
 			return region;
 	}
 
@@ -121,13 +121,10 @@ u32 kgsl_regmap_read(struct kgsl_regmap *regmap, u32 offset)
 	if (region->ops && region->ops->preaccess)
 		region->ops->preaccess(region);
 
-	if (regmap->use_relaxed) {
-		val = readl_relaxed(region_addr(region, offset));
-		/* Allow previous read to post before returning the value */
-		rmb();
-	} else {
-		val = readl(region_addr(region, offset));
-	}
+	val = readl_relaxed(region_addr(region, offset));
+	/* Allow previous read to post before returning the value */
+	rmb();
+
 	return val;
 }
 
@@ -141,13 +138,10 @@ void kgsl_regmap_write(struct kgsl_regmap *regmap, u32 value, u32 offset)
 	if (region->ops && region->ops->preaccess)
 		region->ops->preaccess(region);
 
-	if (regmap->use_relaxed) {
-		/* Make sure all pending writes have posted first */
-		wmb();
-		writel_relaxed(value, region_addr(region, offset));
-	} else {
-		writel(value, region_addr(region, offset));
-	}
+	/* Make sure all pending writes have posted first */
+	wmb();
+	writel_relaxed(value, region_addr(region, offset));
+
 	trace_kgsl_regwrite(offset, value);
 }
 
@@ -203,17 +197,11 @@ void kgsl_regmap_rmw(struct kgsl_regmap *regmap, u32 offset, u32 mask,
 	if (region->ops && region->ops->preaccess)
 		region->ops->preaccess(region);
 
-	if (regmap->use_relaxed) {
-		val = readl_relaxed(region_addr(region, offset));
-		/* Make sure the read posted and all pending writes are done */
-		mb();
-		writel_relaxed((val & ~mask) | or, region_addr(region, offset));
-	} else {
-		val = readl(region_addr(region, offset));
-		/* Make sure the read posted and all pending writes are done */
-		mb();
-		writel((val & ~mask) | or, region_addr(region, offset));
-	}
+	val = readl_relaxed(region_addr(region, offset));
+	/* Make sure the read posted and all pending writes are done */
+	mb();
+	writel_relaxed((val & ~mask) | or, region_addr(region, offset));
+
 	trace_kgsl_regwrite(offset, (val & ~mask) | or);
 }
 

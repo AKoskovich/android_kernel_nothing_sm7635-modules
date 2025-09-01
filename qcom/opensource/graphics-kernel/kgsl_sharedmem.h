@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2002,2007-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #ifndef __KGSL_SHAREDMEM_H
 #define __KGSL_SHAREDMEM_H
@@ -22,10 +22,6 @@ extern bool kgsl_sharedmem_noretry_flag;
 #define KGSL_CACHE_OP_INV       0x01
 #define KGSL_CACHE_OP_FLUSH     0x02
 #define KGSL_CACHE_OP_CLEAN     0x03
-
-#define TEST_FLAG(_bit, _val) ((atomic_read(_val) & (_bit)) != 0)
-#define SET_FLAG(_bit, _val) atomic_or((int)(_bit), (_val))
-#define CLEAR_FLAG(_bit, _val) atomic_and(~(int)(_bit), (_val))
 
 void kgsl_sharedmem_free(struct kgsl_memdesc *memdesc);
 
@@ -286,7 +282,7 @@ int kgsl_memdesc_sg_dma(struct kgsl_memdesc *memdesc,
  */
 static inline bool kgsl_memdesc_is_global(const struct kgsl_memdesc *memdesc)
 {
-	return memdesc && (TEST_FLAG(KGSL_MEMDESC_GLOBAL, &memdesc->priv));
+	return memdesc && (memdesc->priv & KGSL_MEMDESC_GLOBAL);
 }
 
 /*
@@ -297,7 +293,7 @@ static inline bool kgsl_memdesc_is_global(const struct kgsl_memdesc *memdesc)
  */
 static inline bool kgsl_memdesc_is_secured(const struct kgsl_memdesc *memdesc)
 {
-	return memdesc && (TEST_FLAG(KGSL_MEMDESC_SECURE, &memdesc->priv));
+	return memdesc && (memdesc->priv & KGSL_MEMDESC_SECURE);
 }
 
 /*
@@ -308,7 +304,7 @@ static inline bool kgsl_memdesc_is_secured(const struct kgsl_memdesc *memdesc)
  */
 static inline bool kgsl_memdesc_is_reclaimed(const struct kgsl_memdesc *memdesc)
 {
-	return memdesc && (TEST_FLAG(KGSL_MEMDESC_RECLAIMED, &memdesc->priv));
+	return memdesc && (memdesc->priv & KGSL_MEMDESC_RECLAIMED);
 }
 
 /*
@@ -335,7 +331,7 @@ kgsl_memdesc_use_cpu_map(const struct kgsl_memdesc *memdesc)
 static inline uint64_t
 kgsl_memdesc_footprint(const struct kgsl_memdesc *memdesc)
 {
-	if (!(TEST_FLAG(KGSL_MEMDESC_GUARD_PAGE, &memdesc->priv)))
+	if (!(memdesc->priv & KGSL_MEMDESC_GUARD_PAGE))
 		return memdesc->size;
 
 	return PAGE_ALIGN(memdesc->size + PAGE_SIZE);

@@ -7,10 +7,42 @@
 #include "adreno.h"
 #include "adreno_gen8.h"
 #include "adreno_gen8_gmu.h"
-#include "adreno_gen8_0_0_snapshot.h"
+#include "adreno_gen8_3_0_snapshot.h"
 #include "adreno_snapshot.h"
 #include "gen8_reg.h"
 #include "kgsl_device.h"
+
+size_t gen8_snapshot_gmu_mem(struct kgsl_device *device,
+		u8 *buf, size_t remain, void *priv)
+{
+	struct kgsl_snapshot_gmu_mem *mem_hdr =
+		(struct kgsl_snapshot_gmu_mem *)buf;
+	u32 *data = (u32 *)(buf + sizeof(*mem_hdr));
+	struct gmu_mem_type_desc *desc = priv;
+
+	if (priv == NULL || desc->memdesc->hostptr == NULL)
+		return 0;
+
+	if (remain < desc->memdesc->size + sizeof(*mem_hdr)) {
+		dev_err(device->dev,
+			"snapshot: Not enough memory for the gmu section %d\n",
+			desc->type);
+		return 0;
+	}
+
+	mem_hdr->type = desc->type;
+	mem_hdr->hostaddr = (u64)(uintptr_t)desc->memdesc->hostptr;
+	mem_hdr->gmuaddr = desc->memdesc->gmuaddr;
+	mem_hdr->gpuaddr = 0;
+
+	/* The hw fence queues are mapped as iomem in the kernel */
+	if (desc->type == SNAPSHOT_GMU_MEM_HW_FENCE)
+		memcpy_fromio(data, desc->memdesc->hostptr, desc->memdesc->size);
+	else
+		memcpy(data, desc->memdesc->hostptr, desc->memdesc->size);
+
+	return desc->memdesc->size + sizeof(*mem_hdr);
+}
 
 static size_t gen8_gmu_snapshot_dtcm(struct kgsl_device *device,
 		u8 *buf, size_t remain, void *priv)
@@ -55,8 +87,7 @@ static size_t gen8_gmu_snapshot_itcm(struct kgsl_device *device,
 	struct gen8_gmu_device *gmu = (struct gen8_gmu_device *)priv;
 
 	if (!gmu->itcm_shadow) {
-		dev_err(GMU_PDEV_DEV(device),
-				"No memory allocated for ITCM shadow capture\n");
+		dev_err(&gmu->pdev->dev, "No memory allocated for ITCM shadow capture\n");
 		return 0;
 	}
 
@@ -106,8 +137,33 @@ static void gen8_gmu_snapshot_memories(struct kgsl_device *device,
 
 		kgsl_snapshot_add_section(device,
 			KGSL_SNAPSHOT_SECTION_GMU_MEMORY,
-			snapshot, adreno_snapshot_gmu_mem, &desc);
+			snapshot, gen8_snapshot_gmu_mem, &desc);
 	}
+}
+
+struct kgsl_snapshot_gmu_version {
+	u32 type;
+	u32 value;
+};
+
+static size_t gen8_snapshot_gmu_version(struct kgsl_device *device,
+		u8 *buf, size_t remain, void *priv)
+{
+	struct kgsl_snapshot_debug *header = (struct kgsl_snapshot_debug *)buf;
+	u32 *data = (u32 *) (buf + sizeof(*header));
+	struct kgsl_snapshot_gmu_version *ver = priv;
+
+	if (remain < DEBUG_SECTION_SZ(1)) {
+		SNAPSHOT_ERR_NOMEM(device, "GMU Version");
+		return 0;
+	}
+
+	header->type = ver->type;
+	header->size = 1;
+
+	*data = ver->value;
+
+	return DEBUG_SECTION_SZ(1);
 }
 
 static void gen8_gmu_snapshot_versions(struct kgsl_device *device,
@@ -131,7 +187,7 @@ static void gen8_gmu_snapshot_versions(struct kgsl_device *device,
 
 	for (i = 0; i < ARRAY_SIZE(gmu_vers); i++)
 		kgsl_snapshot_add_section(device, KGSL_SNAPSHOT_SECTION_DEBUG,
-				snapshot, adreno_snapshot_gmu_version,
+				snapshot, gen8_snapshot_gmu_version,
 				&gmu_vers[i]);
 }
 
@@ -187,10 +243,9 @@ static void gen8_gmu_device_snapshot(struct kgsl_device *device,
 {
 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
 	struct gen8_gmu_device *gmu = to_gen8_gmu(adreno_dev);
-	const struct adreno_gen8_core *gpucore = to_gen8_core(adreno_dev);
+	const struct adreno_gen8_core *gpucore = to_gen8_core(ADRENO_DEVICE(device));
 	const struct gen8_snapshot_block_list *gen8_snapshot_block_list =
 						gpucore->gen8_snapshot_block_list;
-	const u32 *regs_ptr = (const u32 *)gen8_snapshot_block_list->cx_misc_regs;
 	u32 i, slice, j;
 	struct gen8_reg_list_info info = {0};
 
@@ -204,19 +259,6 @@ static void gen8_gmu_device_snapshot(struct kgsl_device *device,
 	kgsl_snapshot_add_section(device, KGSL_SNAPSHOT_SECTION_REGS_V2, snapshot,
 		gen8_snapshot_rscc_registers, (void *) gen8_snapshot_block_list->rscc_regs);
 
-	/*
-	 * We want to capture these through AHB path here because we might skip them
-	 * in the crashdumper path if GX is OFF, and these are needed for debug.
-	 */
-	if (!kgsl_regmap_valid_offset(&device->regmap, regs_ptr[0]))
-		WARN_ONCE(1, "cx_misc registers are not defined in device tree");
-	else
-		kgsl_snapshot_add_section(device, KGSL_SNAPSHOT_SECTION_REGS_V2,
-			snapshot, adreno_snapshot_registers_v2, (void *)regs_ptr);
-
-	kgsl_snapshot_add_section(device, KGSL_SNAPSHOT_SECTION_GMU_MEMORY,
-		snapshot, gen8_gmu_snapshot_dtcm, gmu);
-
 	/* Capture GMU registers which are on CX domain and unsliced */
 	kgsl_snapshot_add_section(device, KGSL_SNAPSHOT_SECTION_REGS_V2, snapshot,
 		adreno_snapshot_registers_v2,
@@ -224,7 +266,7 @@ static void gen8_gmu_device_snapshot(struct kgsl_device *device,
 
 	if (!gen8_gmu_rpmh_pwr_state_is_active(device) ||
 		!gen8_gmu_gx_is_on(adreno_dev))
-		return;
+		goto dtcm;
 
 	/* Set fence to ALLOW mode so registers can be read */
 	kgsl_regwrite(device, GEN8_GMUAO_AHB_FENCE_CTRL, 0);
@@ -233,7 +275,7 @@ static void gen8_gmu_device_snapshot(struct kgsl_device *device,
 	for (i = 0 ; i < gen8_snapshot_block_list->num_gmu_gx_regs; i++) {
 		struct gen8_reg_list *regs = &gen8_snapshot_block_list->gmu_gx_regs[i];
 
-		slice = NUMBER_OF_SLICES(regs->slice_region, adreno_dev);
+		slice = regs->slice_region ? MAX_PHYSICAL_SLICES : 1;
 		for (j = 0 ; j < slice; j++) {
 			info.regs = regs;
 			info.slice_id = SLICE_ID(regs->slice_region, j);
@@ -241,6 +283,10 @@ static void gen8_gmu_device_snapshot(struct kgsl_device *device,
 				gen8_legacy_snapshot_registers, &info);
 		}
 	}
+
+dtcm:
+	kgsl_snapshot_add_section(device, KGSL_SNAPSHOT_SECTION_GMU_MEMORY,
+		snapshot, gen8_gmu_snapshot_dtcm, gmu);
 }
 
 void gen8_gmu_snapshot(struct adreno_device *adreno_dev,

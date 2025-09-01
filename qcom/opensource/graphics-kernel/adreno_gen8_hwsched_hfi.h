@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2023-2024, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef _ADRENO_GEN8_HWSCHED_HFI_H_
@@ -35,61 +35,8 @@
 
 /*
  * This is used to avoid creating any more hardware fences until concurrent reset/recovery completes
- * or when soccp vote fails
  */
 #define GEN8_HWSCHED_HW_FENCE_ABORT_BIT 0x2
-
-#define MAX_THROTTLE_LVLS 3
-struct hfi_tsens_cfg {
-	/** @limit_u: deci-C value for upper trigger point */
-	u32 limit_u;
-	/** @limit_l: deci-C value for lower trigger point */
-	u32 limit_l;
-	/** @margin_u: deci-C value for upper trigger intercept margin */
-	u32 margin_u;
-	/** @margin_l: deci-C value for lower trigger intercept margin */
-	u32 margin_l;
-} __packed;
-
-struct hfi_tsens_throttle_param {
-	/** @throttle_hyst: Microsecond wait between each throttle level */
-	u32 throttle_hyst;
-	/** @num_throttle_cnt: Number of entries in throttle_levels */
-	u32 num_throttle_cnt;
-	/** @throttle_lvls: Percent of original clock to throttle per level */
-	u32 throttle_lvls[MAX_THROTTLE_LVLS];
-} __packed;
-
-struct hfi_therm_profile_ctrl {
-	/** @feature_en: Feature enable status */
-	u16 feature_en;
-	/** @feature_rev: Feature revision */
-	u16 feature_rev;
-	/** @tsens_en: tsens sensor enable status */
-	u32 tsens_en;
-	/** @tj_limit: deci-C value for tj limit */
-	u32 tj_limit;
-	/** @tskin_addr: unused */
-	u32 tskin_addr;
-	/** @tskin_limit: unused */
-	u32 tskin_limit;
-	/** @tsens_cfg_cnt: Count of tsens configuration structs */
-	u32 tsens_cfg_cnt;
-	/** @tsens_cfg: Struct of tsens configurations */
-	struct hfi_tsens_cfg tsens_cfg;
-	/** @throttle_cfg: Struct of throttle configurations */
-	struct hfi_tsens_throttle_param throttle_cfg;
-} __packed;
-
-/* H2F */
-struct hfi_thermaltable_cmd {
-	/** @hdr: HFI header message */
-	u32 hdr;
-	/** @version: Version identifier for the format used for domains */
-	u32 version;
-	/** @ctrl: Thermal profile control information */
-	struct hfi_therm_profile_ctrl ctrl;
-} __packed;
 
 struct gen8_hwsched_hfi {
 	struct hfi_mem_alloc_entry mem_alloc_table[32];
@@ -138,8 +85,6 @@ struct gen8_hwsched_hfi {
 		unsigned long flags;
 		/** @seqnum: Sequence number for hardware fence packet header */
 		atomic_t seqnum;
-		/** @soccp_rproc: rproc handle for soccp */
-		struct rproc *soccp_rproc;
 	} hw_fence;
 	/**
 	 * @hw_fence_timer: Timer to trigger fault if unack'd hardware fence count does'nt drop
@@ -262,6 +207,18 @@ struct gen8_hwsched_hfi *to_gen8_hwsched_hfi(struct adreno_device *adreno_dev);
 u32 gen8_hwsched_preempt_count_get(struct adreno_device *adreno_dev);
 
 /**
+ * gen8_hwsched_parse_payload - Parse payload to look up a key
+ * @payload: Pointer to a payload section
+ * @key: The key who's value is to be looked up
+ *
+ * This function parses the payload data which is a sequence
+ * of key-value pairs.
+ *
+ * Return: The value of the key or 0 if key is not found
+ */
+u32 gen8_hwsched_parse_payload(struct payload_section *payload, u32 key);
+
+/**
  * gen8_hwsched_lpac_cp_init - Send CP_INIT to LPAC via HFI
  * @adreno_dev: Pointer to adreno device structure
  *
@@ -325,6 +282,18 @@ void gen8_hwsched_create_hw_fence(struct adreno_device *adreno_dev,
 	struct kgsl_sync_fence *kfence);
 
 /**
+ * gen8_hwsched_drain_context_hw_fences - Drain context's hardware fences via GMU
+ * @adreno_dev: Pointer to adreno device
+ * @drawctxt: Pointer to the adreno context which is to be flushed
+ *
+ * Trigger hardware fences that were never dispatched to GMU
+ *
+ * Return: Zero on success or negative error on failure
+ */
+int gen8_hwsched_drain_context_hw_fences(struct adreno_device *adreno_dev,
+		struct adreno_context *drawctxt);
+
+/**
  * gen8_hwsched_check_context_inflight_hw_fences - Check whether all hardware fences
  * from a context have been sent to the TxQueue or not
  * @adreno_dev: Pointer to adreno device
@@ -337,6 +306,25 @@ void gen8_hwsched_create_hw_fence(struct adreno_device *adreno_dev,
  */
 int gen8_hwsched_check_context_inflight_hw_fences(struct adreno_device *adreno_dev,
 	struct adreno_context *drawctxt);
+
+/**
+ * gen8_remove_hw_fence_entry - Remove hardware fence entry
+ * @adreno_dev: pointer to the adreno device
+ * @entry: Pointer to the hardware fence entry
+ */
+void gen8_remove_hw_fence_entry(struct adreno_device *adreno_dev,
+	struct adreno_hw_fence_entry *entry);
+
+/**
+ * gen8_trigger_hw_fence_cpu - Trigger hardware fence from cpu
+ * @adreno_dev: pointer to the adreno device
+ * @fence: hardware fence entry to be triggered
+ *
+ * Trigger the hardware fence by sending it to GMU's TxQueue and raise the
+ * interrupt from GMU to APPS
+ */
+void gen8_trigger_hw_fence_cpu(struct adreno_device *adreno_dev,
+	struct adreno_hw_fence_entry *fence);
 
 /**
  * gen8_hwsched_disable_hw_fence_throttle - Disable hardware fence throttling after reset
@@ -368,14 +356,4 @@ void gen8_hwsched_process_msgq(struct adreno_device *adreno_dev);
  */
 int gen8_hwsched_boot_gpu(struct adreno_device *adreno_dev);
 
-/**
- * gen8_hwsched_get_rb_hostptr - Get rinbuffer host pointer
- * @adreno_dev: pointer to the adreno device
- * @gpuaddr: ringbuffer gpu address
- * @size: size of the ringbuffer
- *
- * Return: Host pointer of the gpu ringbuffer
- */
-void *gen8_hwsched_get_rb_hostptr(struct adreno_device *adreno_dev,
-	u64 gpuaddr, u32 size);
 #endif

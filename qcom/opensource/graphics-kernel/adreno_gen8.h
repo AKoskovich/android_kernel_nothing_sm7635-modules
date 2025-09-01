@@ -10,12 +10,7 @@
 #include <linux/delay.h>
 
 #include "adreno_gen8_gmu.h"
-#include "adreno_gen8_hwsched_hfi.h"
 #include "gen8_reg.h"
-
-#define GEN8_0_0_NUM_PHYSICAL_SLICES	3
-#define GEN8_3_0_NUM_PHYSICAL_SLICES	1
-#define GEN8_6_0_NUM_PHYSICAL_SLICES	2
 
 /* Forward struct declaration */
 struct gen8_snapshot_block_list;
@@ -173,10 +168,6 @@ struct adreno_gen8_core {
 	bool fast_bus_hint;
 	/** @noc_timeout_us: GPU config NOC port timeout in usec */
 	u32 noc_timeout_us;
-	/** @cl_no_ft_timeout_ms: Use this timeout for CL NO_FT instead of infinite */
-	u32 cl_no_ft_timeout_ms;
-	/** @therm_profile: GMU thermal mitigation profile */
-	const struct hfi_therm_profile_ctrl *therm_profile;
 };
 
 /**
@@ -240,6 +231,8 @@ struct gen8_cp_smmu_info {
 #define GEN8_CP_CTXRECORD_SIZE_IN_BYTES		(13536 * SZ_1K)
 /* Size of preemption record to be dumped in snapshot */
 #define GEN8_SNAPSHOT_CTXRECORD_SIZE_IN_BYTES	(128 * 1024)
+/* Size of the user context record block (in bytes) */
+#define GEN8_CP_CTXRECORD_USER_RESTORE_SIZE	(192 * 1024)
 /* Size of the performance counter save/restore block (in bytes) */
 #define GEN8_CP_PERFCOUNTER_SAVE_RESTORE_SIZE	(4 * 1024)
 
@@ -306,7 +299,11 @@ u32 gen8_preemption_pre_ibsubmit(struct adreno_device *adreno_dev,
 		struct adreno_ringbuffer *rb, struct adreno_context *drawctxt,
 		u32 *cmds);
 
+u32 gen8_set_marker(u32 *cmds, enum adreno_cp_marker_type type);
+
 void gen8_preemption_callback(struct adreno_device *adreno_dev, int bit);
+
+int gen8_preemption_context_init(struct kgsl_context *context);
 
 void gen8_preemption_context_destroy(struct kgsl_context *context);
 
@@ -615,26 +612,4 @@ void gen8_regread_aperture(struct kgsl_device *device,
  */
 void gen8_host_aperture_set(struct adreno_device *adreno_dev, u32 pipe_id,
 		u32 slice_id, u32 use_slice_id);
-
-#if IS_ENABLED(CONFIG_QCOM_KGSL_CORESIGHT)
-void gen8_coresight_init(struct adreno_device *device);
-#else
-static inline void gen8_coresight_init(struct adreno_device *device) { }
-#endif
-
-/**
- * gen8_get_num_slices - Get the number of physical slices for Gen8 GPUs
- * @adreno_dev: Handle to the adreno device
- *
- * Return: Number of physical slices available on Gen8 GPUs
- */
-static inline u32 gen8_get_num_slices(struct adreno_device *adreno_dev)
-{
-	if (adreno_is_gen8_3_0(adreno_dev))
-		return GEN8_3_0_NUM_PHYSICAL_SLICES;
-	else if (adreno_is_gen8_6_0(adreno_dev))
-		return GEN8_6_0_NUM_PHYSICAL_SLICES;
-	else
-		return GEN8_0_0_NUM_PHYSICAL_SLICES;
-}
 #endif

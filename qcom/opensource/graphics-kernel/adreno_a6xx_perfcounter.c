@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include "adreno.h"
@@ -135,7 +135,7 @@ static int a6xx_counter_inline_enable(struct adreno_device *adreno_dev,
 	 * rb[0] will not get scheduled to run
 	 */
 	if (adreno_dev->cur_rb != rb)
-		adreno_scheduler_queue(adreno_dev);
+		adreno_dispatcher_schedule(device);
 
 	/* wait for the above commands submitted to complete */
 	ret = adreno_ringbuffer_waittimestamp(rb, rb->timestamp,
@@ -985,7 +985,7 @@ static const struct adreno_perfcount_group a6xx_hwsched_perfcounter_groups
 		NULL),
 };
 
-/* a610, a612, gen6_3_26_0, a616, a618 and a619 do not have the GMU registers.
+/* a610, a612, a616, a618 and a619 do not have the GMU registers.
  * a605, a608, a615, a630, a640 and a680 don't have enough room in the
  * CP_PROTECT registers so the GMU counters are not accessible
  */

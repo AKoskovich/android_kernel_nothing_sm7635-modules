@@ -6,20 +6,11 @@
 #ifndef __KGSL_GMU_CORE_H
 #define __KGSL_GMU_CORE_H
 
-#include <linux/mailbox_client.h>
 #include <linux/rbtree.h>
-#if (KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE)
-#include <linux/remoteproc/qcom_rproc.h>
-#endif
+#include <linux/mailbox_client.h>
 
 /* GMU_DEVICE - Given an KGSL device return the GMU specific struct */
 #define GMU_DEVICE_OPS(_a) ((_a)->gmu_core.dev_ops)
-
-/* GMU_PDEV - Given a KGSL device return the GMU platform device struct */
-#define GMU_PDEV(device) ((device)->gmu_core.pdev)
-
-/* GMU_PDEV_DEV - Given a KGSL device return pointer to struct dev for GMU platform device */
-#define GMU_PDEV_DEV(device) (&((GMU_PDEV(device))->dev))
 
 #define MAX_GX_LEVELS		32
 #define MAX_GX_LEVELS_LEGACY	16
@@ -57,7 +48,6 @@ enum gmu_core_flags {
 	GMU_ENABLED,
 	GMU_RSCC_SLEEP_SEQ_DONE,
 	GMU_DISABLE_SLUMBER,
-	GMU_THERMAL_MITIGATION,
 };
 
 /*
@@ -73,6 +63,15 @@ enum oob_request {
 	oob_boot_slumber = 6, /* reserved special case */
 	oob_dcvs = 7, /* reserved special case */
 	oob_max,
+};
+
+enum gmu_pwrctrl_mode {
+	GMU_FW_START,
+	GMU_FW_STOP,
+	GMU_SUSPEND,
+	GMU_DCVS_NOHFI,
+	GMU_NOTIFY_SLUMBER,
+	INVALID_POWER_CTRL
 };
 
 #define GPU_HW_ACTIVE	0x00
@@ -181,12 +180,6 @@ enum gmu_vrb_idx {
 	VRB_WARMBOOT_SCRATCH_IDX = 1,
 	/* Contains the address of GMU trace buffer */
 	VRB_TRACE_BUFFER_ADDR_IDX = 2,
-	/* Contains the number of hw fence shadow table entries */
-	VRB_HW_FENCE_SHADOW_NUM_ENTRIES = 3,
-	/* Contains OpenCL no fault tolerance timeout in ms */
-	VRB_CL_NO_FT_TIMEOUT = 4,
-	/* Contains the total number of GPU preemptions */
-	VRB_PREEMPT_COUNT_TOTAL = 5,
 };
 
 /* For GMU Trace */
@@ -278,8 +271,6 @@ struct gmu_trace_header {
 enum gmu_trace_id {
 	GMU_TRACE_PREEMPT_TRIGGER = 1,
 	GMU_TRACE_PREEMPT_DONE = 2,
-	GMU_TRACE_EXTERNAL_HW_FENCE_SIGNAL = 3,
-	GMU_TRACE_SYNCOBJ_RETIRE = 4,
 	GMU_TRACE_MAX,
 };
 
@@ -293,17 +284,6 @@ struct trace_preempt_done {
 	u32 prev_rb;
 	u32 next_rb;
 	u32 ctx_switch_cntl;
-} __packed;
-
-struct trace_ext_hw_fence_signal {
-	u64 context;
-	u64 seq_no;
-	u32 flags;
-} __packed;
-
-struct trace_syncobj_retire {
-	u32 gmu_ctxt_id;
-	u32 timestamp;
 } __packed;
 
 /**
@@ -384,39 +364,11 @@ enum {
 	GMU_PRIV_WARMBOOT_GMU_INIT_DONE,
 	/* Indicates if GPU BOOT HFI messages are recorded successfully */
 	GMU_PRIV_WARMBOOT_GPU_BOOT_DONE,
-	/* Indicates if soccp was voted on for hardware fences */
-	GMU_PRIV_SOCCP_VOTE_ON,
 };
 
 struct device_node;
 struct kgsl_device;
 struct kgsl_snapshot;
-
-#define GMU_FAULT_PANIC_NONE 0
-enum gmu_fault_panic_policy {
-	GMU_FAULT_DEVICE_START = 1,
-	GMU_FAULT_HFI_INIT,
-	GMU_FAULT_OOB_SET,
-	GMU_FAULT_HFI_RECIVE_ACK,
-	GMU_FAULT_SEND_CMD_WAIT_INLINE,
-	GMU_FAULT_HFI_SEND_GENERIC_REQ,
-	GMU_FAULT_F2H_MSG_ERR,
-	GMU_FAULT_H2F_MSG_START,
-	GMU_FAULT_WAIT_ACK_COMPLETION,
-	GMU_FAULT_HFI_ACK,
-	GMU_FAULT_CTX_UNREGISTER,
-	GMU_FAULT_WAIT_FOR_LOWEST_IDLE,
-	GMU_FAULT_WAIT_FOR_IDLE,
-	GMU_FAULT_HW_FENCE,
-	GMU_FAULT_MAX,
-};
-
-#define KGSL_GMU_CORE_FORCE_PANIC(gf_panic, pdev, ticks, policy) do { \
-		if (gf_panic & BIT(policy)) { \
-			dev_err(&pdev->dev, "GMU always on ticks: %llx\n", ticks);\
-			BUG();\
-		} \
-	} while (0)
 
 struct gmu_dev_ops {
 	int (*oob_set)(struct kgsl_device *device, enum oob_request req);
@@ -430,8 +382,8 @@ struct gmu_dev_ops {
 	int (*bcl_sid_set)(struct kgsl_device *device, u32 sid_id, u64 sid_val);
 	u64 (*bcl_sid_get)(struct kgsl_device *device, u32 sid_id);
 	void (*force_first_boot)(struct kgsl_device *device);
-	void (*send_nmi)(struct kgsl_device *device, bool force,
-		enum gmu_fault_panic_policy gf_policy);
+	void (*send_nmi)(struct kgsl_device *device, bool force);
+	void (*send_tlb_hint)(struct kgsl_device *device, bool val);
 };
 
 /**
@@ -444,12 +396,6 @@ struct gmu_core_device {
 	void *ptr;
 	const struct gmu_dev_ops *dev_ops;
 	unsigned long flags;
-	/** @gf_panic: GMU fault panic policy */
-	enum gmu_fault_panic_policy gf_panic;
-	/** @pdev: platform device for the gmu */
-	struct platform_device *pdev;
-	/** @domain: IOMMU domain for the gmu context */
-	struct iommu_domain *domain;
 };
 
 extern struct platform_driver a6xx_gmu_driver;
@@ -497,12 +443,10 @@ void gmu_core_dev_cooperative_reset(struct kgsl_device *device);
 /**
  * gmu_core_fault_snapshot - Set gmu fault and trigger snapshot
  * @device: Pointer to the kgsl device
- * @gf_policy: GMU fault panic setting policy
  *
  * Set the gmu fault and take snapshot when we hit a gmu fault
  */
-void gmu_core_fault_snapshot(struct kgsl_device *device,
-			enum gmu_fault_panic_policy gf_policy);
+void gmu_core_fault_snapshot(struct kgsl_device *device);
 
 /**
  * gmu_core_timed_poll_check() - polling *gmu* register at given offset until
@@ -543,34 +487,21 @@ int gmu_core_map_memdesc(struct iommu_domain *domain, struct kgsl_memdesc *memde
 		u64 gmuaddr, int attrs);
 
 /**
- * gmu_core_iommu_init - Set up GMU IOMMU and shared memory with GMU
+ * gmu_core_send_tlb_hint - Send tlb hint for GMU IOMMU domain
  * @device: Pointer to KGSL device
- *
- * Return: 0 on success or error value on failure
+ * @val: tlb hint to be true/false
  */
-int gmu_core_iommu_init(struct kgsl_device *device);
+void gmu_core_send_tlb_hint(struct kgsl_device *device, bool val);
 
 void gmu_core_dev_force_first_boot(struct kgsl_device *device);
 
 /**
  * gmu_core_set_vrb_register - set vrb register value at specified index
- * @vrb: GMU virtual register bank memory
+ * @ptr: vrb host pointer
  * @index: vrb index to write the value
  * @val: value to be writen into vrb
- *
- * Return: Negative error on failure and zero on success.
  */
-int gmu_core_set_vrb_register(struct kgsl_memdesc *vrb, u32 index, u32 val);
-
-/**
- * gmu_core_get_vrb_register - get vrb register value at specified index
- * @vrb: GMU virtual register bank memory
- * @index: vrb index to write the value
- * @val: Pointer to update the data after reading from vrb
- *
- * Return: Negative error on failure and zero on success.
- */
-int gmu_core_get_vrb_register(struct kgsl_memdesc *vrb, u32 index, u32 *val);
+void gmu_core_set_vrb_register(void *ptr, u32 index, u32 val);
 
 /**
  * gmu_core_process_trace_data - Process gmu trace buffer data writes to default linux trace buffer
@@ -600,25 +531,5 @@ void gmu_core_trace_header_init(struct kgsl_gmu_trace *trace);
  * @trace: Pointer to kgsl gmu trace
  */
 void gmu_core_reset_trace_header(struct kgsl_gmu_trace *trace);
-
-/**
- * gmu_core_soccp_vote_init - Initialize soccp rproc handle
- * @dev: Pointer to gmu pdev device
- *
- * Return: Error pointer on failure and NULL or valid rproc handle on success
- */
-struct rproc *gmu_core_soccp_vote_init(struct device *dev);
-
-/**
- * gmu_core_soccp_vote - vote for soccp power
- * @dev: Pointer to gmu pdev device
- * @flags: Pointer to gmu flags
- * @soccp_rproc: Pointer to soccp rproc
- * @pwr_on: Boolean to indicate vote on or off
-
- * Return: Negative error on failure and zero on success.
- */
-int gmu_core_soccp_vote(struct device *dev, unsigned long *flags,
-	struct rproc *soccp_rproc, bool pwr_on);
 
 #endif /* __KGSL_GMU_CORE_H */

@@ -19,7 +19,6 @@ extern const struct adreno_power_ops gen7_gmu_power_ops;
 extern const struct adreno_power_ops gen7_hwsched_power_ops;
 extern const struct adreno_perfcounters adreno_gen7_perfcounters;
 extern const struct adreno_perfcounters adreno_gen7_hwsched_perfcounters;
-extern const struct adreno_perfcounters adreno_gen7_no_cb_perfcounters;
 extern const struct adreno_perfcounters adreno_gen7_9_0_hwsched_perfcounters;
 
 struct gen7_gpudev {
@@ -41,20 +40,6 @@ struct gen7_device {
 	struct gen7_gmu_device gmu;
 	/** @adreno_dev: Container for the generic adreno device */
 	struct adreno_device adreno_dev;
-	/** @aperture: The last value that the host aperture register was programmed to */
-	u32 aperture;
-	/** @ext_pwrup_list_len: External pwrup reglist length */
-	u16 ext_pwrup_list_len;
-};
-
-/**
- * struct gen7_pwrup_extlist - container for powerup external reglist
- */
-struct gen7_pwrup_extlist {
-	/** offset: Dword offset of the register to write */
-	u32 offset;
-	/** pipelines: pipelines to write */
-	u32 pipelines;
 };
 
 /**
@@ -203,6 +188,8 @@ struct gen7_cp_smmu_info {
 #define GEN7_CP_CTXRECORD_MAGIC_REF		0xae399d6eUL
 /* Size of each CP preemption record */
 #define GEN7_CP_CTXRECORD_SIZE_IN_BYTES		(4192 * 1024)
+/* Size of the user context record block (in bytes) */
+#define GEN7_CP_CTXRECORD_USER_RESTORE_SIZE	(192 * 1024)
 /* Size of the performance counter save/restore block (in bytes) */
 #define GEN7_CP_PERFCOUNTER_SAVE_RESTORE_SIZE	(4 * 1024)
 
@@ -234,8 +221,7 @@ struct gen7_cp_smmu_info {
 	 (1 << GEN7_INT_ATBASYNCFIFOOVERFLOW) |		\
 	 (1 << GEN7_INT_ATBBUSOVERFLOW) |		\
 	 (1 << GEN7_INT_OUTOFBOUNDACCESS) |		\
-	 (1 << GEN7_INT_UCHETRAPINTERRUPT) |		\
-	 (1 << GEN7_INT_TSBWRITEERROR))
+	 (1 << GEN7_INT_UCHETRAPINTERRUPT))
 
 /**
  * to_gen7_core - return the gen7 specific GPU core struct
@@ -264,7 +250,12 @@ u32 gen7_preemption_pre_ibsubmit(struct adreno_device *adreno_dev,
 		struct adreno_ringbuffer *rb, struct adreno_context *drawctxt,
 		u32 *cmds);
 
+unsigned int gen7_set_marker(unsigned int *cmds,
+		enum adreno_cp_marker_type type);
+
 void gen7_preemption_callback(struct adreno_device *adreno_dev, int bit);
+
+int gen7_preemption_context_init(struct kgsl_context *context);
 
 void gen7_preemption_context_destroy(struct kgsl_context *context);
 

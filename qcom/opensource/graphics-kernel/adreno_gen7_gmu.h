@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023,2025, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #ifndef __ADRENO_GEN7_GMU_H
 #define __ADRENO_GEN7_GMU_H
@@ -23,11 +23,19 @@ struct gen7_dcvs_table {
  * @ver: GMU Version information
  * @irq: GMU interrupt number
  * @fw_image: GMU FW image
+ * @hfi_mem: pointer to HFI shared memory
  * @dump_mem: pointer to GMU debug dump memory
  * @gmu_log: gmu event log memory
  * @hfi: HFI controller
+ * @num_gpupwrlevels: number GPU frequencies in GPU freq table
+ * @num_bwlevel: number of GPU BW levels
+ * @num_cnocbwlevel: number CNOC BW levels
+ * @rpmh_votes: RPMh TCS command set for GPU, GMU voltage and bw scaling
  * @clks: GPU subsystem clocks required for GMU functionality
+ * @wakeup_pwrlevel: GPU wake up power/DCVS level in case different
+ *  than default power level
  * @idle_level: Minimal GPU idle power level
+ * @fault_count: GMU fault count
  * @mailbox: Messages to AOP for ACD enable/disable go through this
  * @log_wptr_retention: Store the log wptr offset on slumber
  */
@@ -39,6 +47,7 @@ struct gen7_gmu_device {
 		u32 pwr_dev;
 		u32 hfi;
 	} ver;
+	struct platform_device *pdev;
 	int irq;
 	const struct firmware *fw_image;
 	struct kgsl_memdesc *dump_mem;
@@ -78,6 +87,8 @@ struct gen7_gmu_device {
 	unsigned long flags;
 	/** @rscc_virt: Pointer where RSCC block is mapped */
 	void __iomem *rscc_virt;
+	/** @domain: IOMMU domain for the kernel context */
+	struct iommu_domain *domain;
 	/** @log_stream_enable: GMU log streaming enable. Disabled by default */
 	bool log_stream_enable;
 	/** @log_group_mask: Allows overriding default GMU log group mask */
@@ -112,8 +123,6 @@ struct gen7_gmu_device {
 	u32 switch_to_unsec_hdr;
 	/** @dcvs_table: Table for gpu dcvs levels */
 	struct gen7_dcvs_table dcvs_table;
-	/** @cur_freq: Tracks scaled frequency for GMU */
-	u32 cur_freq;
 };
 
 /* Helper function to get to gen7 gmu device from adreno device */
@@ -469,11 +478,9 @@ void gen7_gmu_handle_watchdog(struct adreno_device *adreno_dev);
 /**
  * gen7_gmu_send_nmi - Send NMI to GMU
  * @device: Pointer to the kgsl device
- * @gf_policy: GMU fault panic setting policy
  * @force: Boolean to forcefully send NMI irrespective of GMU state
  */
-void gen7_gmu_send_nmi(struct kgsl_device *device, bool force,
-		       enum gmu_fault_panic_policy gf_policy);
+void gen7_gmu_send_nmi(struct kgsl_device *device, bool force);
 
 /**
  * gen7_gmu_add_to_minidump - Register gen7_device with va minidump
@@ -482,11 +489,24 @@ void gen7_gmu_send_nmi(struct kgsl_device *device, bool force,
 int gen7_gmu_add_to_minidump(struct adreno_device *adreno_dev);
 
 /**
- * gen7_gmu_clock_set_rate - Set the gmu clock rate
- * @adreno_dev: Handle to the adreno device
- * @req_freq: Requested freq to set gmu to
+ * gen7_snapshot_gmu_mem - Snapshot a GMU memory descriptor
+ * @device: Pointer to the kgsl device
+ * @buf: Destination snapshot buffer
+ * @remain: Remaining size of the snapshot buffer
+ * @priv: Opaque handle
  *
- * Returns 0 on success or error on clock set rate failure
+ * Return: Number of bytes written to snapshot buffer
  */
-int gen7_gmu_clock_set_rate(struct adreno_device *adreno_dev, u32 req_freq);
+size_t gen7_snapshot_gmu_mem(struct kgsl_device *device,
+	u8 *buf, size_t remain, void *priv);
+
+/**
+ * gen7_bus_ab_quantize - Calculate the AB vote that needs to be sent to GMU
+ * @adreno_dev: Handle to the adreno device
+ * @ab: ab request that needs to be scaled in MBps
+ *
+ * Returns the AB value that needs to be prefixed to bandwidth vote in kbps
+ */
+u32 gen7_bus_ab_quantize(struct adreno_device *adreno_dev, u32 ab);
+
 #endif

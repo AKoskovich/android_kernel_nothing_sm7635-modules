@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2002,2007-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2023,2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/slab.h>
@@ -198,15 +198,8 @@ int adreno_perfcounter_read_group(struct adreno_device *adreno_dev,
 		/* group/counter iterator */
 		for (i = 0; i < group->reg_count; i++) {
 			if (group->regs[i].countable == list[j].countable) {
-				unsigned long irq_flags;
-
-				if (!ADRENO_ACQUIRE_CP_SEMAPHORE(adreno_dev, irq_flags)) {
-					ret = -EAGAIN;
-					break;
-				}
 				list[j].value = adreno_perfcounter_read(
 					adreno_dev, list[j].groupid, i);
-				ADRENO_RELEASE_CP_SEMAPHORE(adreno_dev, irq_flags);
 				break;
 			}
 		}
@@ -310,6 +303,8 @@ int adreno_perfcounter_query_group(struct adreno_device *adreno_dev,
 	if (counters == NULL || groupid >= counters->group_count)
 		return -EINVAL;
 
+	mutex_lock(&device->mutex);
+
 	group = &(counters->groups[groupid]);
 	*max_counters = group->reg_count;
 
@@ -317,16 +312,18 @@ int adreno_perfcounter_query_group(struct adreno_device *adreno_dev,
 	 * if NULL countable or *count of zero, return max reg_count in
 	 * *max_counters and return success
 	 */
-	if (countables == NULL || count == 0)
+	if (countables == NULL || count == 0) {
+		mutex_unlock(&device->mutex);
 		return 0;
+	}
 
 	t = min_t(unsigned int, group->reg_count, count);
 
 	buf = kmalloc_array(t, sizeof(unsigned int), GFP_KERNEL);
-	if (buf == NULL)
+	if (buf == NULL) {
+		mutex_unlock(&device->mutex);
 		return -ENOMEM;
-
-	mutex_lock(&device->mutex);
+	}
 
 	for (i = 0; i < t; i++)
 		buf[i] = group->regs[i].countable;

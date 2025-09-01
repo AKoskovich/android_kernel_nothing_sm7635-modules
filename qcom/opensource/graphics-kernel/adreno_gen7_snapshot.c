@@ -8,12 +8,8 @@
 #include "adreno_snapshot.h"
 #include "adreno_gen7_0_0_snapshot.h"
 #include "adreno_gen7_2_0_snapshot.h"
-#include "adreno_gen7_3_0_snapshot.h"
-#include "adreno_gen7_6_0_snapshot.h"
 #include "adreno_gen7_9_0_snapshot.h"
 #include "adreno_gen7_11_0_snapshot.h"
-#include "adreno_gen7_14_0_snapshot.h"
-#include "adreno_gen7_17_0_snapshot.h"
 
 static struct kgsl_memdesc *gen7_capturescript;
 static struct kgsl_memdesc *gen7_crashdump_registers;
@@ -76,58 +72,6 @@ const struct gen7_snapshot_block_list gen7_2_0_snapshot_block_list = {
 	.index_registers_len = ARRAY_SIZE(gen7_cp_indexed_reg_list),
 };
 
-const struct gen7_snapshot_block_list gen7_3_0_snapshot_block_list = {
-	.pre_crashdumper_regs = gen7_0_0_pre_crashdumper_gpu_registers,
-	.debugbus_blocks = gen7_3_0_debugbus_blocks,
-	.debugbus_blocks_len = ARRAY_SIZE(gen7_3_0_debugbus_blocks),
-	.gbif_debugbus_blocks = gen7_gbif_debugbus_blocks,
-	.gbif_debugbus_blocks_len = ARRAY_SIZE(gen7_gbif_debugbus_blocks),
-	.cx_debugbus_blocks = gen7_cx_dbgc_debugbus_blocks,
-	.cx_debugbus_blocks_len = ARRAY_SIZE(gen7_cx_dbgc_debugbus_blocks),
-	.external_core_regs = gen7_3_0_external_core_regs,
-	.num_external_core_regs = ARRAY_SIZE(gen7_3_0_external_core_regs),
-	.gmu_regs = gen7_3_0_gmu_registers,
-	.gmu_gx_regs = gen7_3_0_gmu_gx_registers,
-	.rscc_regs = gen7_0_0_rscc_registers,
-	.reg_list = gen7_3_0_reg_list,
-	.cx_misc_regs = gen7_0_0_cx_misc_registers,
-	.shader_blocks = gen7_3_0_shader_blocks,
-	.num_shader_blocks = ARRAY_SIZE(gen7_3_0_shader_blocks),
-	.clusters = gen7_3_0_clusters,
-	.num_clusters = ARRAY_SIZE(gen7_3_0_clusters),
-	.sptp_clusters = gen7_3_0_sptp_clusters,
-	.num_sptp_clusters = ARRAY_SIZE(gen7_3_0_sptp_clusters),
-	.post_crashdumper_regs = gen7_0_0_post_crashdumper_registers,
-	.index_registers = gen7_3_0_cp_indexed_reg_list,
-	.index_registers_len = ARRAY_SIZE(gen7_3_0_cp_indexed_reg_list),
-};
-
-const struct gen7_snapshot_block_list gen7_6_0_snapshot_block_list = {
-	.pre_crashdumper_regs = gen7_0_0_pre_crashdumper_gpu_registers,
-	.debugbus_blocks = gen7_2_0_debugbus_blocks,
-	.debugbus_blocks_len = ARRAY_SIZE(gen7_2_0_debugbus_blocks),
-	.gbif_debugbus_blocks = gen7_gbif_debugbus_blocks,
-	.gbif_debugbus_blocks_len = ARRAY_SIZE(gen7_gbif_debugbus_blocks),
-	.cx_debugbus_blocks = gen7_cx_dbgc_debugbus_blocks,
-	.cx_debugbus_blocks_len = ARRAY_SIZE(gen7_cx_dbgc_debugbus_blocks),
-	.external_core_regs = gen7_6_0_external_core_regs,
-	.num_external_core_regs = ARRAY_SIZE(gen7_6_0_external_core_regs),
-	.gmu_regs = gen7_2_0_gmu_registers,
-	.gmu_gx_regs = gen7_2_0_gmugx_registers,
-	.rscc_regs = gen7_2_0_rscc_registers,
-	.reg_list = gen7_2_0_reg_list,
-	.cx_misc_regs = gen7_0_0_cx_misc_registers,
-	.shader_blocks = gen7_2_0_shader_blocks,
-	.num_shader_blocks = ARRAY_SIZE(gen7_2_0_shader_blocks),
-	.clusters = gen7_2_0_clusters,
-	.num_clusters = ARRAY_SIZE(gen7_2_0_clusters),
-	.sptp_clusters = gen7_2_0_sptp_clusters,
-	.num_sptp_clusters = ARRAY_SIZE(gen7_2_0_sptp_clusters),
-	.post_crashdumper_regs = gen7_0_0_post_crashdumper_registers,
-	.index_registers = gen7_cp_indexed_reg_list,
-	.index_registers_len = ARRAY_SIZE(gen7_cp_indexed_reg_list),
-};
-
 const struct gen7_snapshot_block_list gen7_9_0_snapshot_block_list = {
 	.pre_crashdumper_regs = gen7_9_0_pre_crashdumper_gpu_registers,
 	.debugbus_blocks = gen7_9_0_debugbus_blocks,
@@ -154,32 +98,6 @@ const struct gen7_snapshot_block_list gen7_9_0_snapshot_block_list = {
 	.index_registers_len = ARRAY_SIZE(gen7_9_0_cp_indexed_reg_list),
 };
 
-const struct gen7_snapshot_block_list gen7_14_0_snapshot_block_list = {
-	.pre_crashdumper_regs = gen7_9_0_pre_crashdumper_gpu_registers,
-	.debugbus_blocks = gen7_14_0_debugbus_blocks,
-	.debugbus_blocks_len = ARRAY_SIZE(gen7_14_0_debugbus_blocks),
-	.gbif_debugbus_blocks = gen7_gbif_debugbus_blocks,
-	.gbif_debugbus_blocks_len = ARRAY_SIZE(gen7_gbif_debugbus_blocks),
-	.cx_debugbus_blocks = gen7_cx_dbgc_debugbus_blocks,
-	.cx_debugbus_blocks_len = ARRAY_SIZE(gen7_cx_dbgc_debugbus_blocks),
-	.external_core_regs = gen7_14_0_external_core_regs,
-	.num_external_core_regs = ARRAY_SIZE(gen7_14_0_external_core_regs),
-	.gmu_regs = gen7_14_0_gmu_registers,
-	.gmu_gx_regs = gen7_14_0_gmu_gx_registers,
-	.rscc_regs = gen7_14_0_rscc_registers,
-	.reg_list = gen7_14_0_reg_list,
-	.cx_misc_regs = gen7_14_0_cx_misc_registers,
-	.shader_blocks = gen7_14_0_shader_blocks,
-	.num_shader_blocks = ARRAY_SIZE(gen7_14_0_shader_blocks),
-	.clusters = gen7_14_0_clusters,
-	.num_clusters = ARRAY_SIZE(gen7_14_0_clusters),
-	.sptp_clusters = gen7_14_0_sptp_clusters,
-	.num_sptp_clusters = ARRAY_SIZE(gen7_14_0_sptp_clusters),
-	.post_crashdumper_regs = gen7_14_0_post_crashdumper_registers,
-	.index_registers = gen7_14_0_cp_indexed_reg_list,
-	.index_registers_len = ARRAY_SIZE(gen7_14_0_cp_indexed_reg_list),
-};
-
 const struct gen7_snapshot_block_list gen7_11_0_snapshot_block_list = {
 	.pre_crashdumper_regs = gen7_0_0_pre_crashdumper_gpu_registers,
 	.debugbus_blocks = gen7_11_0_debugbus_blocks,
@@ -204,32 +122,6 @@ const struct gen7_snapshot_block_list gen7_11_0_snapshot_block_list = {
 	.post_crashdumper_regs = gen7_0_0_post_crashdumper_registers,
 	.index_registers = gen7_11_0_cp_indexed_reg_list,
 	.index_registers_len = ARRAY_SIZE(gen7_11_0_cp_indexed_reg_list),
-};
-
-const struct gen7_snapshot_block_list gen7_17_0_snapshot_block_list = {
-	.pre_crashdumper_regs = gen7_9_0_pre_crashdumper_gpu_registers,
-	.debugbus_blocks = gen7_14_0_debugbus_blocks,
-	.debugbus_blocks_len = ARRAY_SIZE(gen7_14_0_debugbus_blocks),
-	.gbif_debugbus_blocks = gen7_gbif_debugbus_blocks,
-	.gbif_debugbus_blocks_len = ARRAY_SIZE(gen7_gbif_debugbus_blocks),
-	.cx_debugbus_blocks = gen7_cx_dbgc_debugbus_blocks,
-	.cx_debugbus_blocks_len = ARRAY_SIZE(gen7_cx_dbgc_debugbus_blocks),
-	.external_core_regs = gen7_17_0_external_core_regs,
-	.num_external_core_regs = ARRAY_SIZE(gen7_17_0_external_core_regs),
-	.gmu_regs = gen7_14_0_gmu_registers,
-	.gmu_gx_regs = gen7_14_0_gmu_gx_registers,
-	.rscc_regs = gen7_17_0_rscc_registers,
-	.reg_list = gen7_14_0_reg_list,
-	.cx_misc_regs = gen7_14_0_cx_misc_registers,
-	.shader_blocks = gen7_14_0_shader_blocks,
-	.num_shader_blocks = ARRAY_SIZE(gen7_14_0_shader_blocks),
-	.clusters = gen7_14_0_clusters,
-	.num_clusters = ARRAY_SIZE(gen7_14_0_clusters),
-	.sptp_clusters = gen7_14_0_sptp_clusters,
-	.num_sptp_clusters = ARRAY_SIZE(gen7_14_0_sptp_clusters),
-	.post_crashdumper_regs = gen7_14_0_post_crashdumper_registers,
-	.index_registers = gen7_14_0_cp_indexed_reg_list,
-	.index_registers_len = ARRAY_SIZE(gen7_14_0_cp_indexed_reg_list),
 };
 
 #define GEN7_SP_READ_SEL_VAL(_location, _pipe, _statetype, _usptp, _sptp) \
@@ -407,7 +299,8 @@ static size_t gen7_legacy_snapshot_shader(struct kgsl_device *device,
 	 * AHB path might fail. Hence, skip SP_INST_TAG and SP_INST_DATA*
 	 * state types during snapshot dump in legacy flow.
 	 */
-	if (adreno_is_gen7_0_x_family(adreno_dev) || adreno_is_gen7_14_0_family(adreno_dev)) {
+	if (adreno_is_gen7_0_0(adreno_dev) || adreno_is_gen7_0_1(adreno_dev) ||
+		adreno_is_gen7_4_0(adreno_dev)) {
 		if (block->statetype == SP_INST_TAG ||
 			block->statetype == SP_INST_DATA ||
 			block->statetype == SP_INST_DATA_1 ||
@@ -743,7 +636,7 @@ static void gen7_snapshot_shader(struct kgsl_device *device,
 		void *priv) = gen7_legacy_snapshot_shader;
 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
 
-	if (adreno_is_gen7_0_x_family(adreno_dev) || adreno_is_gen7_14_0_family(adreno_dev))
+	if (adreno_is_gen7_0_x_family(adreno_dev))
 		kgsl_regrmw(device, GEN7_SP_DBG_CNTL, GENMASK(1, 0), 3);
 
 	if (CD_SCRIPT_CHECK(device)) {
@@ -813,7 +706,7 @@ static void gen7_snapshot_shader(struct kgsl_device *device,
 	}
 
 done:
-	if (adreno_is_gen7_0_x_family(adreno_dev) || adreno_is_gen7_14_0_family(adreno_dev))
+	if (adreno_is_gen7_0_x_family(adreno_dev))
 		kgsl_regrmw(device, GEN7_SP_DBG_CNTL, GENMASK(1, 0), 0x0);
 }
 
@@ -822,20 +715,18 @@ static void gen7_snapshot_mempool(struct kgsl_device *device,
 {
 	/* set CP_CHICKEN_DBG[StabilizeMVC] to stabilize it while dumping */
 	kgsl_regrmw(device, GEN7_CP_CHICKEN_DBG, 0x4, 0x4);
+	kgsl_regrmw(device, GEN7_CP_BV_CHICKEN_DBG, 0x4, 0x4);
 
 	kgsl_snapshot_indexed_registers(device, snapshot,
 		GEN7_CP_MEM_POOL_DBG_ADDR, GEN7_CP_MEM_POOL_DBG_DATA,
 		0, 0x2200);
 
-	if (!adreno_is_gen7_no_cb_family(ADRENO_DEVICE(device))) {
-		kgsl_regrmw(device, GEN7_CP_BV_CHICKEN_DBG, 0x4, 0x4);
-		kgsl_snapshot_indexed_registers(device, snapshot,
-			GEN7_CP_BV_MEM_POOL_DBG_ADDR, GEN7_CP_BV_MEM_POOL_DBG_DATA,
-			0, 0x2200);
-		kgsl_regrmw(device, GEN7_CP_BV_CHICKEN_DBG, 0x4, 0x0);
-	}
+	kgsl_snapshot_indexed_registers(device, snapshot,
+		GEN7_CP_BV_MEM_POOL_DBG_ADDR, GEN7_CP_BV_MEM_POOL_DBG_DATA,
+		0, 0x2200);
 
 	kgsl_regrmw(device, GEN7_CP_CHICKEN_DBG, 0x4, 0x0);
+	kgsl_regrmw(device, GEN7_CP_BV_CHICKEN_DBG, 0x4, 0x0);
 }
 
 static unsigned int gen7_read_dbgahb(struct kgsl_device *device,
@@ -1453,6 +1344,85 @@ static void gen7_snapshot_debugbus(struct adreno_device *adreno_dev,
 	}
 }
 
+/* gen7_snapshot_sqe() - Dump SQE data in snapshot */
+static size_t gen7_snapshot_sqe(struct kgsl_device *device, u8 *buf,
+		size_t remain, void *priv)
+{
+	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+	struct kgsl_snapshot_debug *header = (struct kgsl_snapshot_debug *)buf;
+	unsigned int *data = (unsigned int *)(buf + sizeof(*header));
+	struct adreno_firmware *fw = ADRENO_FW(adreno_dev, ADRENO_FW_SQE);
+
+	if (remain < DEBUG_SECTION_SZ(GEN7_SQE_FW_SNAPSHOT_DWORDS)) {
+		SNAPSHOT_ERR_NOMEM(device, "SQE VERSION DEBUG");
+		return 0;
+	}
+
+	/* Dump the SQE firmware version */
+	header->type = SNAPSHOT_DEBUG_SQE_VERSION;
+	header->size = GEN7_SQE_FW_SNAPSHOT_DWORDS;
+	memcpy(data, fw->memdesc->hostptr, (GEN7_SQE_FW_SNAPSHOT_DWORDS * sizeof(u32)));
+
+	return DEBUG_SECTION_SZ(GEN7_SQE_FW_SNAPSHOT_DWORDS);
+}
+
+/* gen7_snapshot_aqe() - Dump AQE data in snapshot */
+static size_t gen7_snapshot_aqe(struct kgsl_device *device, u8 *buf,
+		size_t remain, void *priv)
+{
+	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+	struct kgsl_snapshot_debug *header = (struct kgsl_snapshot_debug *)buf;
+	u32 *data = (unsigned int *)(buf + sizeof(*header));
+	struct adreno_firmware *fw = ADRENO_FW(adreno_dev, ADRENO_FW_AQE);
+
+	if (!ADRENO_FEATURE(adreno_dev, ADRENO_AQE))
+		return 0;
+
+	if (remain < DEBUG_SECTION_SZ(1)) {
+		SNAPSHOT_ERR_NOMEM(device, "AQE VERSION DEBUG");
+		return 0;
+	}
+
+	/* Dump the AQE firmware version */
+	header->type = SNAPSHOT_DEBUG_AQE_VERSION;
+	header->size = 1;
+	*data = fw->version;
+
+	return DEBUG_SECTION_SZ(1);
+}
+
+/* Snapshot the preemption related buffers */
+static size_t snapshot_preemption_record(struct kgsl_device *device,
+	u8 *buf, size_t remain, void *priv)
+{
+	struct kgsl_memdesc *memdesc = priv;
+	struct kgsl_snapshot_gpu_object_v2 *header =
+		(struct kgsl_snapshot_gpu_object_v2 *)buf;
+	u8 *ptr = buf + sizeof(*header);
+	const struct adreno_gen7_core *gpucore = to_gen7_core(ADRENO_DEVICE(device));
+	u64 ctxt_record_size = GEN7_CP_CTXRECORD_SIZE_IN_BYTES;
+
+	if (gpucore->ctxt_record_size)
+		ctxt_record_size = gpucore->ctxt_record_size;
+
+	ctxt_record_size = min_t(u64, ctxt_record_size, device->snapshot_ctxt_record_size);
+
+	if (remain < (ctxt_record_size + sizeof(*header))) {
+		SNAPSHOT_ERR_NOMEM(device, "PREEMPTION RECORD");
+		return 0;
+	}
+
+	header->size = ctxt_record_size >> 2;
+	header->gpuaddr = memdesc->gpuaddr;
+	header->ptbase =
+		kgsl_mmu_pagetable_get_ttbr0(device->mmu.defaultpagetable);
+	header->type = SNAPSHOT_GPU_OBJECT_GLOBAL;
+
+	memcpy(ptr, memdesc->hostptr, ctxt_record_size);
+
+	return ctxt_record_size + sizeof(*header);
+}
+
 static void gen7_reglist_snapshot(struct kgsl_device *device,
 					struct kgsl_snapshot *snapshot)
 {
@@ -1567,15 +1537,9 @@ static void gen7_cx_misc_regs_snapshot(struct kgsl_device *device,
 	}
 
 done:
-	regs_ptr = (const u32 *)gen7_snapshot_block_list->cx_misc_regs;
-
-	if (!kgsl_regmap_valid_offset(&device->regmap, regs_ptr[0])) {
-		WARN_ONCE(1, "cx_misc registers are not defined in device tree");
-		return;
-	}
-
 	kgsl_snapshot_add_section(device, KGSL_SNAPSHOT_SECTION_REGS_V2,
-		snapshot, adreno_snapshot_registers_v2, (void *)regs_ptr);
+		snapshot, adreno_snapshot_cx_misc_registers,
+		(void *)gen7_snapshot_block_list->cx_misc_regs);
 }
 
 static void gen7_snapshot_br_roq(struct kgsl_device *device,
@@ -1668,6 +1632,7 @@ void gen7_snapshot(struct adreno_device *adreno_dev,
 		struct kgsl_snapshot *snapshot)
 {
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+	struct adreno_ringbuffer *rb;
 	unsigned int i;
 	u32 cgc = 0, cgc1 = 0, cgc2 = 0;
 	const struct adreno_gen7_core *gpucore = to_gen7_core(ADRENO_DEVICE(device));
@@ -1709,6 +1674,14 @@ void gen7_snapshot(struct adreno_device *adreno_dev,
 	}
 
 	gen7_cx_misc_regs_snapshot(device, snapshot);
+
+	/* SQE Firmware */
+	kgsl_snapshot_add_section(device, KGSL_SNAPSHOT_SECTION_DEBUG,
+		snapshot, gen7_snapshot_sqe, NULL);
+
+	/* AQE Firmware */
+	kgsl_snapshot_add_section(device, KGSL_SNAPSHOT_SECTION_DEBUG,
+		snapshot, gen7_snapshot_aqe, NULL);
 
 	if (!adreno_gx_is_on(adreno_dev))
 		return;
@@ -1769,16 +1742,13 @@ void gen7_snapshot(struct adreno_device *adreno_dev,
 			gen7_snapshot_block_list->index_registers[i].data, 0,
 			gen7_snapshot_block_list->index_registers[i].size);
 
-	if (!adreno_is_gen7_9_x(adreno_dev))
+	if (!adreno_is_gen7_9_x(adreno_dev)) {
 		gen7_snapshot_br_roq(device, snapshot);
 
-	if (!adreno_is_gen7_9_x(adreno_dev) &&
-		!adreno_is_gen7_no_cb_family(adreno_dev))
 		gen7_snapshot_bv_roq(device, snapshot);
 
-	if (!adreno_is_gen7_9_x(adreno_dev) &&
-		ADRENO_FEATURE(adreno_dev, ADRENO_LPAC))
 		gen7_snapshot_lpac_roq(device, snapshot);
+	}
 
 	/* Mempool debug data */
 	gen7_snapshot_mempool(device, snapshot);
@@ -1799,8 +1769,14 @@ void gen7_snapshot(struct adreno_device *adreno_dev,
 	kgsl_regwrite(device, GEN7_RBBM_SNAPSHOT_STATUS, 0x0);
 
 	/* Preemption record */
-	adreno_snapshot_preemption_record(device, snapshot);
-
+	if (adreno_is_preemption_enabled(adreno_dev)) {
+		FOR_EACH_RINGBUFFER(adreno_dev, rb, i) {
+			kgsl_snapshot_add_section(device,
+				KGSL_SNAPSHOT_SECTION_GPU_OBJECT_V2,
+				snapshot, snapshot_preemption_record,
+				rb->preemption_desc);
+		}
+	}
 	if (is_current_rt)
 		sched_set_fifo(current);
 }

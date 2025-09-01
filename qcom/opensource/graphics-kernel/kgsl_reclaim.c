@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
- * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/kthread.h>
@@ -31,115 +31,21 @@ struct work_struct reclaim_work;
 
 static atomic_t kgsl_nr_to_reclaim;
 
-#if (KERNEL_VERSION(6, 2, 0) <= LINUX_VERSION_CODE)
-static void kgsl_memdesc_clear_unevictable(struct kgsl_process_private *process,
-		struct kgsl_memdesc *memdesc)
-{
-	struct folio_batch fbatch;
-	int i;
-
-	/*
-	 * Pages that are first allocated are by default added to
-	 * unevictable list. To reclaim them, we first clear the
-	 * AS_UNEVICTABLE flag of the shmem file address space thus
-	 * check_move_unevictable_folios() places them on the
-	 * evictable list.
-	 *
-	 * Once reclaim is done, hint that further shmem allocations
-	 * will have to be on the unevictable list.
-	 */
-	mapping_clear_unevictable(memdesc->shmem_filp->f_mapping);
-	folio_batch_init(&fbatch);
-	for (i = 0; i < memdesc->page_count; i++) {
-		set_page_dirty_lock(memdesc->pages[i]);
-		spin_lock(&memdesc->lock);
-		folio_batch_add(&fbatch, page_folio(memdesc->pages[i]));
-		memdesc->pages[i] = NULL;
-		atomic_inc(&process->unpinned_page_count);
-		spin_unlock(&memdesc->lock);
-		if (folio_batch_count(&fbatch) == PAGEVEC_SIZE) {
-			check_move_unevictable_folios(&fbatch);
-			__folio_batch_release(&fbatch);
-		}
-	}
-
-	if (folio_batch_count(&fbatch)) {
-		check_move_unevictable_folios(&fbatch);
-		__folio_batch_release(&fbatch);
-	}
-}
-
-static int kgsl_read_mapping(struct kgsl_memdesc *memdesc, struct page **page, int i)
-{
-	struct folio *folio = shmem_read_folio_gfp(memdesc->shmem_filp->f_mapping,
-						   i, kgsl_gfp_mask(0));
-
-	if (!IS_ERR(folio)) {
-		*page = folio_page(folio, 0);
-		return 0;
-	}
-
-	return PTR_ERR(folio);
-}
-#else
-static void kgsl_memdesc_clear_unevictable(struct kgsl_process_private *process,
-		struct kgsl_memdesc *memdesc)
-{
-	struct pagevec pvec;
-	int i;
-
-	/*
-	 * Pages that are first allocated are by default added to
-	 * unevictable list. To reclaim them, we first clear the
-	 * AS_UNEVICTABLE flag of the shmem file address space thus
-	 * check_move_unevictable_pages() places them on the
-	 * evictable list.
-	 *
-	 * Once reclaim is done, hint that further shmem allocations
-	 * will have to be on the unevictable list.
-	 */
-	mapping_clear_unevictable(memdesc->shmem_filp->f_mapping);
-	pagevec_init(&pvec);
-	for (i = 0; i < memdesc->page_count; i++) {
-		set_page_dirty_lock(memdesc->pages[i]);
-		spin_lock(&memdesc->lock);
-		pagevec_add(&pvec, memdesc->pages[i]);
-		memdesc->pages[i] = NULL;
-		atomic_inc(&process->unpinned_page_count);
-		spin_unlock(&memdesc->lock);
-		if (pagevec_count(&pvec) == PAGEVEC_SIZE) {
-			check_move_unevictable_pages(&pvec);
-			__pagevec_release(&pvec);
-		}
-	}
-
-	if (pagevec_count(&pvec)) {
-		check_move_unevictable_pages(&pvec);
-		__pagevec_release(&pvec);
-	}
-}
-
-static int kgsl_read_mapping(struct kgsl_memdesc *memdesc, struct page **page, int i)
-{
-	*page = shmem_read_mapping_page_gfp(memdesc->shmem_filp->f_mapping,
-					   i, kgsl_gfp_mask(0));
-	return PTR_ERR_OR_ZERO(*page);
-}
-#endif
-
 static int kgsl_memdesc_get_reclaimed_pages(struct kgsl_mem_entry *entry)
 {
 	struct kgsl_memdesc *memdesc = &entry->memdesc;
 	int i, ret;
-	struct page *page = NULL;
+	struct page *page;
 
 	for (i = 0; i < memdesc->page_count; i++) {
 		if (memdesc->pages[i])
 			continue;
 
-		ret = kgsl_read_mapping(memdesc, &page, i);
-		if (ret)
-			return ret;
+		page = shmem_read_mapping_page_gfp(
+			memdesc->shmem_filp->f_mapping, i, kgsl_gfp_mask(0));
+
+		if (IS_ERR(page))
+			return PTR_ERR(page);
 
 		kgsl_page_sync(memdesc->dev, page, PAGE_SIZE, DMA_BIDIRECTIONAL);
 
@@ -162,7 +68,8 @@ static int kgsl_memdesc_get_reclaimed_pages(struct kgsl_mem_entry *entry)
 
 	trace_kgsl_reclaim_memdesc(entry, false);
 
-	CLEAR_FLAG(KGSL_MEMDESC_RECLAIMED | KGSL_MEMDESC_SKIP_RECLAIM, &memdesc->priv);
+	memdesc->priv &= ~KGSL_MEMDESC_RECLAIMED;
+	memdesc->priv &= ~KGSL_MEMDESC_SKIP_RECLAIM;
 
 	return 0;
 }
@@ -189,7 +96,7 @@ int kgsl_reclaim_to_pinned_state(
 			break;
 		}
 
-		if (TEST_FLAG(KGSL_MEMDESC_RECLAIMED, &entry->memdesc.priv))
+		if (entry->memdesc.priv & KGSL_MEMDESC_RECLAIMED)
 			valid_entry = kgsl_mem_entry_get(entry);
 		spin_unlock(&process->mem_lock);
 
@@ -304,12 +211,18 @@ ssize_t kgsl_nr_to_scan_show(struct device *dev,
 	return scnprintf(buf, PAGE_SIZE, "%d\n", kgsl_nr_to_scan);
 }
 
+static void kgsl_release_page_vec(struct pagevec *pvec)
+{
+	check_move_unevictable_pages(pvec);
+	__pagevec_release(pvec);
+}
+
 static u32 kgsl_reclaim_process(struct kgsl_process_private *process,
 		u32 pages_to_reclaim)
 {
 	struct kgsl_memdesc *memdesc;
 	struct kgsl_mem_entry *entry, *valid_entry;
-	u32 next = 0, remaining = pages_to_reclaim, priv = 0;
+	u32 next = 0, remaining = pages_to_reclaim;
 
 	/*
 	 * If we do not get the lock here, it means that the buffers are
@@ -342,11 +255,10 @@ static u32 kgsl_reclaim_process(struct kgsl_process_private *process,
 		}
 
 		memdesc = &entry->memdesc;
-		priv = atomic_read(&memdesc->priv);
 		if (!entry->pending_free &&
-				(priv & KGSL_MEMDESC_CAN_RECLAIM) &&
-				!(priv & KGSL_MEMDESC_RECLAIMED) &&
-				!(priv & KGSL_MEMDESC_SKIP_RECLAIM))
+				(memdesc->priv & KGSL_MEMDESC_CAN_RECLAIM) &&
+				!(memdesc->priv & KGSL_MEMDESC_RECLAIMED) &&
+				!(memdesc->priv & KGSL_MEMDESC_SKIP_RECLAIM))
 			valid_entry = kgsl_mem_entry_get(entry);
 		spin_unlock(&process->mem_lock);
 
@@ -376,11 +288,38 @@ static u32 kgsl_reclaim_process(struct kgsl_process_private *process,
 		}
 
 		if (!kgsl_mmu_unmap(memdesc->pagetable, memdesc)) {
-			kgsl_memdesc_clear_unevictable(process, memdesc);
-			remaining -= memdesc->page_count;
+			int i;
+			struct pagevec pvec;
+
+			/*
+			 * Pages that are first allocated are by default added to
+			 * unevictable list. To reclaim them, we first clear the
+			 * AS_UNEVICTABLE flag of the shmem file address space thus
+			 * check_move_unevictable_pages() places them on the
+			 * evictable list.
+			 *
+			 * Once reclaim is done, hint that further shmem allocations
+			 * will have to be on the unevictable list.
+			 */
+			mapping_clear_unevictable(memdesc->shmem_filp->f_mapping);
+			pagevec_init(&pvec);
+			for (i = 0; i < memdesc->page_count; i++) {
+				set_page_dirty_lock(memdesc->pages[i]);
+				spin_lock(&memdesc->lock);
+				pagevec_add(&pvec, memdesc->pages[i]);
+				memdesc->pages[i] = NULL;
+				atomic_inc(&process->unpinned_page_count);
+				spin_unlock(&memdesc->lock);
+				if (pagevec_count(&pvec) == PAGEVEC_SIZE)
+					kgsl_release_page_vec(&pvec);
+				remaining--;
+			}
+			if (pagevec_count(&pvec))
+				kgsl_release_page_vec(&pvec);
+
 			reclaim_shmem_address_space(memdesc->shmem_filp->f_mapping);
 			mapping_set_unevictable(memdesc->shmem_filp->f_mapping);
-			SET_FLAG(KGSL_MEMDESC_RECLAIMED, &memdesc->priv);
+			memdesc->priv |= KGSL_MEMDESC_RECLAIMED;
 			trace_kgsl_reclaim_memdesc(entry, true);
 		}
 
@@ -468,6 +407,14 @@ kgsl_reclaim_shrink_count_objects(struct shrinker *shrinker,
 	return count_reclaimable;
 }
 
+/* Shrinker callback data*/
+static struct shrinker kgsl_reclaim_shrinker = {
+	.count_objects = kgsl_reclaim_shrink_count_objects,
+	.scan_objects = kgsl_reclaim_shrink_scan_objects,
+	.seeks = DEFAULT_SEEKS,
+	.batch = 0,
+};
+
 void kgsl_reclaim_proc_private_init(struct kgsl_process_private *process)
 {
 	mutex_init(&process->reclaim_lock);
@@ -477,74 +424,28 @@ void kgsl_reclaim_proc_private_init(struct kgsl_process_private *process)
 	atomic_set(&process->unpinned_page_count, 0);
 }
 
-#if (KERNEL_VERSION(6, 7, 0) <= LINUX_VERSION_CODE)
-static int kgsl_reclaim_shrinker_init(void)
-{
-	kgsl_driver.reclaim_shrinker = shrinker_alloc(0, "kgsl_reclaim_shrinker");
-
-	if (!kgsl_driver.reclaim_shrinker)
-		return -ENOMEM;
-
-	/* Initialize shrinker */
-	kgsl_driver.reclaim_shrinker->count_objects = kgsl_reclaim_shrink_count_objects;
-	kgsl_driver.reclaim_shrinker->scan_objects = kgsl_reclaim_shrink_scan_objects;
-	kgsl_driver.reclaim_shrinker->seeks = DEFAULT_SEEKS;
-	kgsl_driver.reclaim_shrinker->batch = 0;
-
-	shrinker_register(kgsl_driver.reclaim_shrinker);
-	return 0;
-}
-
-static void kgsl_reclaim_shrinker_close(void)
-{
-	if (kgsl_driver.reclaim_shrinker)
-		shrinker_free(kgsl_driver.reclaim_shrinker);
-
-	kgsl_driver.reclaim_shrinker = NULL;
-}
-#else
-/* Shrinker callback data*/
-static struct shrinker kgsl_reclaim_shrinker = {
-	.count_objects = kgsl_reclaim_shrink_count_objects,
-	.scan_objects = kgsl_reclaim_shrink_scan_objects,
-	.seeks = DEFAULT_SEEKS,
-	.batch = 0,
-};
-
-static int kgsl_reclaim_shrinker_init(void)
+int kgsl_reclaim_start(void)
 {
 	int ret;
 
-	kgsl_driver.reclaim_shrinker = &kgsl_reclaim_shrinker;
-
 	/* Initialize shrinker */
 #if (KERNEL_VERSION(6, 0, 0) <= LINUX_VERSION_CODE)
-	ret = register_shrinker(kgsl_driver.reclaim_shrinker, "kgsl_reclaim_shrinker");
+	ret = register_shrinker(&kgsl_reclaim_shrinker, "kgsl_reclaim_shrinker");
 #else
-	ret = register_shrinker(kgsl_driver.reclaim_shrinker);
+	ret = register_shrinker(&kgsl_reclaim_shrinker);
 #endif
+	if (ret)
+		pr_err("kgsl: reclaim: Failed to register shrinker\n");
+
 	return ret;
-}
-
-static void kgsl_reclaim_shrinker_close(void)
-{
-	unregister_shrinker(kgsl_driver.reclaim_shrinker);
-}
-#endif
-
-int kgsl_reclaim_start(void)
-{
-	return kgsl_reclaim_shrinker_init();
 }
 
 int kgsl_reclaim_init(void)
 {
 	int ret = kgsl_reclaim_start();
 
-	if (ret) {
-		pr_err("kgsl: reclaim: Failed to register shrinker\n");
+	if (ret)
 		return ret;
-	}
 
 	INIT_WORK(&reclaim_work, kgsl_reclaim_background_work);
 
@@ -553,6 +454,8 @@ int kgsl_reclaim_init(void)
 
 void kgsl_reclaim_close(void)
 {
-	kgsl_reclaim_shrinker_close();
+	/* Unregister shrinker */
+	unregister_shrinker(&kgsl_reclaim_shrinker);
+
 	cancel_work_sync(&reclaim_work);
 }

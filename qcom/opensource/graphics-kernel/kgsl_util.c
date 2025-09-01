@@ -12,30 +12,35 @@
 #include <linux/firmware.h>
 #include <linux/ktime.h>
 #include <linux/of_address.h>
-#include <linux/pm_domain.h>
-#include <linux/version.h>
-#if (KERNEL_VERSION(6, 3, 0) <= LINUX_VERSION_CODE)
-#include <linux/firmware/qcom/qcom_scm.h>
-#else
 #include <linux/qcom_scm.h>
-#endif
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 #include <linux/soc/qcom/mdt_loader.h>
 #include <linux/string.h>
+#include <linux/version.h>
+#include <soc/qcom/minidump.h>
 
 #include "adreno.h"
 #include "kgsl_util.h"
 
-bool kgsl_genpd_is_enabled(struct device *dev)
+bool kgsl_regulator_disable_wait(struct regulator *reg, u32 timeout)
 {
-	struct generic_pm_domain *genpd;
+	ktime_t tout = ktime_add_us(ktime_get(), timeout * 1000);
 
-	if (IS_ERR_OR_NULL(dev) || IS_ERR_OR_NULL(dev->pm_domain))
-		return false;
+	if (IS_ERR_OR_NULL(reg))
+		return true;
 
-	genpd = pd_to_genpd(dev->pm_domain);
-	return (READ_ONCE(genpd->status) == GENPD_STATE_ON);
+	regulator_disable(reg);
+
+	for (;;) {
+		if (!regulator_is_enabled(reg))
+			return true;
+
+		if (ktime_compare(ktime_get(), tout) > 0)
+			return (!regulator_is_enabled(reg));
+
+		usleep_range((100 >> 2) + 1, 100);
+	}
 }
 
 struct clk *kgsl_of_clk_by_name(struct clk_bulk_data *clks, int count,
@@ -225,8 +230,6 @@ void kgsl_hwunlock(struct cpu_gpu_lock *lock)
 }
 
 #if IS_ENABLED(CONFIG_QCOM_VA_MINIDUMP)
-#include <soc/qcom/minidump.h>
-
 void kgsl_add_to_minidump(char *name, u64 virt_addr, u64 phy_addr, size_t size)
 {
 	struct md_region md_entry = {0};

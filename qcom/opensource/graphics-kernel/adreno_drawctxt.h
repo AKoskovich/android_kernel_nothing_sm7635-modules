@@ -88,14 +88,6 @@ struct adreno_context {
 	u32 hw_fence_count;
 	/** @syncobj_timestamp: Timestamp to check whether GMU has consumed a syncobj */
 	u32 syncobj_timestamp;
-	/**
-	 * @gmu_hw_fence_ready_ts: This timestamp is used to figure out whether a hardware fence
-	 * is ready to be submitted to GMU at the time of its creation or not. This timestamp
-	 * tracks the timestamp of the most recently submitted cmdbatch submission to the GMU
-	 * context queue for this context. This is different from the internal_timestamp (which gets
-	 * reset to 0 in some cases).
-	 */
-	u32 gmu_hw_fence_ready_ts;
 };
 
 /* Flag definitions for flag field in adreno_context */
@@ -197,27 +189,6 @@ adreno_drawctxt_get_pagetable(struct adreno_context *drawctxt)
  */
 void adreno_drawctxt_set_guilty(struct kgsl_device *device,
 		struct kgsl_context *context);
-
-/**
- * adreno_prepare_preib_preempt_scratch - Update drawctxt pointer in preemption
- * scratch buffer before IB commands
- * @adreno_dev: Pointer to the adreno device
- * @drawctxt: Pointer to the adreno draw context
- * @cmds: Pointer to the ringbuffer to insert opcodes
- *
- * Return: The number of dwords written to @cmds
- */
-u32 adreno_prepare_preib_preempt_scratch(struct adreno_device *adreno_dev,
-		struct adreno_context *drawctxt, u32 *cmds);
-
-/**
- * adreno_prepare_preib_postamble_scratch - Insert postamble packets before IB commands
- * @adreno_dev: Pointer to the adreno device
- * @cmds: Pointer to the ringbuffer to insert opcodes
- *
- * Return: The number of dwords written to @cmds
- */
-u32 adreno_prepare_preib_postamble_scratch(struct adreno_device *adreno_dev, u32 *cmds);
 
 /**
  * adreno_track_context - Add a context to active list and keep track of active contexts

@@ -5,7 +5,7 @@
  */
 
 #include <linux/debugfs.h>
-#include <linux/spinlock.h>
+#include <linux/rwlock.h>
 
 #include "kgsl_debugfs.h"
 #include "kgsl_device.h"

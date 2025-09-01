@@ -7,6 +7,8 @@
 #ifndef _ADRENO_HWSCHED_H_
 #define _ADRENO_HWSCHED_H_
 
+#include <linux/soc/qcom/msm_hw_fence.h>
+
 #include "kgsl_sync.h"
 
 /* This structure represents inflight command object */
@@ -52,10 +54,19 @@ struct adreno_hwsched_ops {
 	 */
 	void (*create_hw_fence)(struct adreno_device *adreno_dev,
 		struct kgsl_sync_fence *kfence);
-	/**
-	 * @get_rb_hostptr - Target specific function to get ringbuffer host pointer
-	 */
-	void *(*get_rb_hostptr)(struct adreno_device *adreno_dev, u64 gpuaddr, u32 size);
+
+};
+
+/**
+ * struct adreno_hw_fence - Container for hardware fences instance
+ */
+struct adreno_hw_fence {
+	/** @handle: Handle for hardware fences */
+	void *handle;
+	/** @descriptor: Memory descriptor for hardware fences */
+	struct msm_hw_fence_mem_addr mem_descriptor;
+	/** @memdesc: Kgsl memory descriptor for hardware fences queue */
+	struct kgsl_memdesc memdesc;
 };
 
 /**
@@ -72,8 +83,13 @@ struct adreno_hwsched {
 	struct llist_head jobs[16];
 	/** @requeue - Array of lists for dispatch jobs that got requeued */
 	struct llist_head requeue[16];
+	/** @work: The work structure to execute dispatcher function */
+	struct kthread_work work;
 	/** @cmd_list: List of objects submitted to dispatch queues */
 	struct list_head cmd_list;
+	/** @fault: Atomic to record a fault */
+	atomic_t fault;
+	struct kthread_worker *worker;
 	/** @hwsched_ops: Container for target specific hwscheduler ops */
 	const struct adreno_hwsched_ops *hwsched_ops;
 	/** @ctxt_bad: Container for the context bad hfi packet */
@@ -89,6 +105,8 @@ struct adreno_hwsched {
 	/** @lsr_check_ws: Lsr work to update power stats */
 	struct work_struct lsr_check_ws;
 	/** @hw_fence: Container for the hw fences instance */
+	struct adreno_hw_fence hw_fence;
+	/** @hw_fence_cache: kmem cache for storing hardware output fences */
 	struct kmem_cache *hw_fence_cache;
 	/** @hw_fence_count: Number of hardware fences that haven't yet been sent to Tx Queue */
 	atomic_t hw_fence_count;
@@ -101,8 +119,6 @@ struct adreno_hwsched {
 	struct kgsl_memdesc global_ctxtq;
 	/** @global_ctxt_gmu_registered: Whether global context is registered with gmu */
 	bool global_ctxt_gmu_registered;
-	/** @hw_fence_md: Kgsl memory descriptor for hardware fences queue */
-	struct kgsl_memdesc hw_fence_md;
 };
 
 /*
@@ -118,6 +134,14 @@ enum adreno_hwsched_flags {
 	ADRENO_HWSCHED_CONTEXT_QUEUE,
 	ADRENO_HWSCHED_HW_FENCE,
 };
+
+/**
+ * adreno_hwsched_trigger - Function to schedule the hwsched thread
+ * @adreno_dev: A handle to adreno device
+ *
+ * Schedule the hw dispatcher for retiring and submitting command objects
+ */
+void adreno_hwsched_trigger(struct adreno_device *adreno_dev);
 
 /**
  * adreno_hwsched_start() - activate the hwsched dispatcher
@@ -138,6 +162,21 @@ int adreno_hwsched_init(struct adreno_device *adreno_dev,
 	const struct adreno_hwsched_ops *hwsched_ops);
 
 /**
+ * adreno_hwsched_fault - Set hwsched fault to request recovery
+ * @adreno_dev: A handle to adreno device
+ * @fault: The type of fault
+ */
+void adreno_hwsched_fault(struct adreno_device *adreno_dev, u32 fault);
+
+/**
+ * adreno_hwsched_clear_fault() - Clear the hwsched fault
+ * @adreno_dev: A pointer to an adreno_device structure
+ *
+ * Clear the hwsched fault status for adreno device
+ */
+void adreno_hwsched_clear_fault(struct adreno_device *adreno_dev);
+
+/**
  * adreno_hwsched_parse_fault_ib - Parse the faulty submission
  * @adreno_dev: pointer to the adreno device
  * @snapshot: Pointer to the snapshot structure
@@ -147,6 +186,8 @@ int adreno_hwsched_init(struct adreno_device *adreno_dev,
  */
 void adreno_hwsched_parse_fault_cmdobj(struct adreno_device *adreno_dev,
 	struct kgsl_snapshot *snapshot);
+
+void adreno_hwsched_flush(struct adreno_device *adreno_dev);
 
 /**
  * adreno_hwsched_unregister_contexts - Reset context gmu_registered bit
@@ -218,22 +259,6 @@ u32 adreno_hwsched_parse_payload(struct payload_section *payload, u32 key);
 u32 adreno_hwsched_gpu_fault(struct adreno_device *adreno_dev);
 
 /**
- * adreno_hwsched_log_destroy_pending_fences - Log and destroy any pending hardware fences if soccp
- * vote failed
- * @adreno_dev: pointer to the adreno device
- * @dev: Pointer to the gmu pdev device
- */
-void adreno_hwsched_log_destroy_pending_hw_fences(struct adreno_device *adreno_dev,
-	struct device *dev);
-
-/**
- * adreno_hwsched_syncobj_kfence_put - Put back kfence context refcounts for this sync object
- * @syncobj: Pointer to the sync object
- *
- */
-void adreno_hwsched_syncobj_kfence_put(struct kgsl_drawobj_sync *syncobj);
-
-/**
  * adreno_hwsched_log_nonfatal_gpu_fault - Logs non fatal GPU error from context bad hfi packet
  * @adreno_dev: pointer to the adreno device
  * @dev: Pointer to the struct device for the GMU platform device
@@ -245,58 +270,4 @@ void adreno_hwsched_syncobj_kfence_put(struct kgsl_drawobj_sync *syncobj);
  */
 bool adreno_hwsched_log_nonfatal_gpu_fault(struct adreno_device *adreno_dev,
 		struct device *dev, u32 error);
-
-/**
- * adreno_hwsched_poll_msg_queue_write_index - Poll on write index of HFI message queue
- * @hfi_mem: Memory descriptor for HFI queue table
- *
- * Returns zero if write index advances or ETIMEDOUT if timed out polling
- */
-int adreno_hwsched_poll_msg_queue_write_index(struct kgsl_memdesc *hfi_mem);
-
-/**
- * adreno_hwsched_remove_hw_fence_entry - Remove hardware fence entry
- * @adreno_dev: pointer to the adreno device
- * @entry: Pointer to the hardware fence entry
- */
-void adreno_hwsched_remove_hw_fence_entry(struct adreno_device *adreno_dev,
-	struct adreno_hw_fence_entry *entry);
-
-/**
- * adreno_gmu_context_queue_read - Read data from context queue
- * @drawctxt: Pointer to the adreno draw context
- * @output: Pointer to read the data into
- * @read_idx: Index to read the data from
- * @size: Number of dwords to read from the context queue
- *
- * Return: 0 on success or negative error on failure
- */
-int adreno_gmu_context_queue_read(struct adreno_context *drawctxt, u32 *output,
-	u32 read_idx, u32 size);
-
-/**
- * adreno_gmu_context_queue_write - Write data to context queue
- *
- * @adreno_dev: Pointer to adreno device structure
- * @gmu_context_queue: Pointer to the memory descriptor for context queue
- * @msg: Pointer to the message data to be written
- * @size_bytes: Size of the message data in bytes
- * @drawobj: Pointer to the draw object
- * @time: Pointer to the submission time information
- *
- * Return: 0 on success or negative error on failure
- */
-int adreno_gmu_context_queue_write(struct adreno_device *adreno_dev,
-	struct kgsl_memdesc *gmu_context_queue, u32 *msg, u32 size_bytes,
-	struct kgsl_drawobj *drawobj, struct adreno_submit_time *time);
-
-/**
- * adreno_hwsched_add_profile_events - Add profiling events
- *
- * @adreno_dev: Pointer to the adreno device structure
- * @cmdobj: Pointer to the command object
- * @time: Pointer to the submission time information
- */
-void adreno_hwsched_add_profile_events(struct adreno_device *adreno_dev,
-	struct kgsl_drawobj_cmd *cmdobj, struct adreno_submit_time *time);
 #endif

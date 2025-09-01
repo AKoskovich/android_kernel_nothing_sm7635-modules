@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2023-2025, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2023-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef _GEN8_REG_H
@@ -510,6 +510,7 @@
 #define GEN8_RBBM_SLICE_PERFCTR_SRAM_INIT_CMD     0x5e8
 #define GEN8_RBBM_SLICE_PERFCTR_FLUSH_HOST_CMD    0x5eb
 #define GEN8_RBBM_SLICE_NC_MODE_CNTL              0x5ec
+#define GEN8_VSC_BIN_SIZE                         0xc02
 #define GEN8_VSC_KMD_DBG_ECO_CNTL                 0xdf0
 
 /* DBGC_CFG registers */
@@ -766,7 +767,6 @@
 #define GEN8_CP_APERTURE_CNTL_GMU                              0x81d
 #define GEN8_CP_APERTURE_CNTL_CD                               0x81e
 #define GEN8_CP_CP2GMU_STATUS                                  0x822
-#define GEN8_CP_SEMAPHORE_REG_0                                0x825
 #define GEN8_CP_RL_ERROR_DETAILS_0                             0x840
 #define GEN8_CP_RL_ERROR_DETAILS_1                             0x841
 #define GEN8_CP_CRASH_DUMP_SCRIPT_BASE_LO                      0x842
@@ -1606,17 +1606,17 @@
 #define GEN8_SMMU_BASE				0x28000
 
 /* GPU CX_MISC registers */
-#define GEN8_GPU_CX_MISC_CX_AHB_AON_CNTL	0x27810
-#define GEN8_GPU_CX_MISC_CX_AHB_GMU_CNTL	0x27811
-#define GEN8_GPU_CX_MISC_CX_AHB_CP_CNTL		0x27812
-#define GEN8_GPU_CX_MISC_CX_AHB_VBIF_SMMU_CNTL	0x27813
-#define GEN8_GPU_CX_MISC_CX_AHB_HOST_CNTL	0x27814
-#define GEN8_GPU_CX_MISC_INT_CLEAR_CMD		0x27831
-#define GEN8_GPU_CX_MISC_INT_0_MASK		0x27833
-#define GEN8_GPU_CX_MISC_INT_0_STATUS		0x27834
-#define GEN8_GPU_CX_MISC_AO_COUNTER_LO		0x27880
-#define GEN8_GPU_CX_MISC_AO_COUNTER_HI		0x27881
-#define GEN8_GPU_CX_MISC_SW_FUSE_VALUE		0x27c00
+#define GEN8_GPU_CX_MISC_CX_AHB_AON_CNTL	0x10
+#define GEN8_GPU_CX_MISC_CX_AHB_GMU_CNTL	0x11
+#define GEN8_GPU_CX_MISC_CX_AHB_CP_CNTL		0x12
+#define GEN8_GPU_CX_MISC_CX_AHB_VBIF_SMMU_CNTL	0x13
+#define GEN8_GPU_CX_MISC_CX_AHB_HOST_CNTL	0x14
+#define GEN8_GPU_CX_MISC_INT_CLEAR_CMD		0x31
+#define GEN8_GPU_CX_MISC_INT_0_MASK		0x33
+#define GEN8_GPU_CX_MISC_INT_0_STATUS		0x34
+#define GEN8_GPU_CX_MISC_AO_COUNTER_LO		0x80
+#define GEN8_GPU_CX_MISC_AO_COUNTER_HI		0x81
+#define GEN8_GPU_CX_MISC_SW_FUSE_VALUE		0x400
 
 /* GPU SW Fuse Feature bit fields */
 #define GEN8_FASTBLEND_SW_FUSE		0

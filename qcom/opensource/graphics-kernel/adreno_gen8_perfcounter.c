@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2023-2025, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2023-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include "adreno.h"
@@ -14,7 +14,8 @@
 
 static void gen8_rbbm_perfctr_flush(struct kgsl_device *device)
 {
-	u32 status, i;
+	u32 val;
+	int ret;
 
 	/*
 	 * Flush delta counters (both perf counters and pipe stats) present in
@@ -23,42 +24,52 @@ static void gen8_rbbm_perfctr_flush(struct kgsl_device *device)
 	kgsl_regwrite(device, GEN8_RBBM_PERFCTR_FLUSH_HOST_CMD, BIT(0));
 	kgsl_regwrite(device, GEN8_RBBM_SLICE_PERFCTR_FLUSH_HOST_CMD, BIT(0));
 
-	/* Ensure all writes are posted before polling status register */
-	wmb();
+	ret = kgsl_regmap_read_poll_timeout(&device->regmap, GEN8_RBBM_PERFCTR_FLUSH_HOST_STATUS,
+		val, (val & PERFCOUNTER_FLUSH_DONE_MASK) == PERFCOUNTER_FLUSH_DONE_MASK,
+		100, 100 * 1000);
 
-	/*
-	 * Poll RBBM_PERFCTR_FLUSH_HOST_STATUS to wait for perfcounter flush completion.
-	 * Use a busy loop as this is called with interrupts and preemption disabled.
-	 */
-	for (i = 0; i < 10; i++) {
-		kgsl_regread(device, GEN8_RBBM_PERFCTR_FLUSH_HOST_STATUS, &status);
-		if (((status & PERFCOUNTER_FLUSH_DONE_MASK) == PERFCOUNTER_FLUSH_DONE_MASK))
-			return;
+	if (ret)
+		dev_err(device->dev, "Perfcounter flush timed out: status=0x%08x\n", val);
+}
 
-		udelay(10);
-	}
+/*
+ * For registers that do not get restored on power cycle, read the value and add
+ * the stored shadow value
+ */
+static u64 gen8_counter_read_norestore(struct adreno_device *adreno_dev,
+		const struct adreno_perfcount_group *group, u32 counter)
+{
+	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+	struct adreno_perfcount_register *reg = &group->regs[counter];
+	u32 hi, lo;
 
-	/* Check status one last time */
-	kgsl_regread(device, GEN8_RBBM_PERFCTR_FLUSH_HOST_STATUS, &status);
+	gen8_rbbm_perfctr_flush(device);
 
-	if ((status & PERFCOUNTER_FLUSH_DONE_MASK) != PERFCOUNTER_FLUSH_DONE_MASK)
-		dev_err_ratelimited(device->dev,
-			"Perfcounter flush timed out: status=0x%08x\n", status);
+	kgsl_regread(device, reg->offset, &lo);
+	kgsl_regread(device, reg->offset_hi, &hi);
+
+	return ((((u64) hi) << 32) | lo) + reg->value;
 }
 
 static int gen8_counter_br_enable(struct adreno_device *adreno_dev,
 		const struct adreno_perfcount_group *group,
 		u32 counter, u32 countable)
 {
+	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	struct adreno_perfcount_register *reg = &group->regs[counter];
-	int ret;
+	int ret = 0;
+	u32 val = 0;
 
-	gen8_host_aperture_set(adreno_dev, PIPE_BR, 0, 0);
+	kgsl_regread(device, GEN8_CP_APERTURE_CNTL_HOST, &val);
+	kgsl_regwrite(device, GEN8_CP_APERTURE_CNTL_HOST, FIELD_PREP(GENMASK(15, 12), PIPE_BR));
 
 	ret = gen8_perfcounter_update(adreno_dev, reg, true,
 			FIELD_PREP(GENMASK(15, 12), PIPE_BR), group->flags);
 
-	gen8_host_aperture_set(adreno_dev, 0, 0, 0);
+	kgsl_regwrite(device, GEN8_CP_APERTURE_CNTL_HOST, val);
+
+	/* Ensure all writes are posted before reading the piped register */
+	mb();
 
 	if (!ret)
 		reg->value = 0;
@@ -70,15 +81,21 @@ static int gen8_counter_bv_enable(struct adreno_device *adreno_dev,
 		const struct adreno_perfcount_group *group,
 		u32 counter, u32 countable)
 {
+	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	struct adreno_perfcount_register *reg = &group->regs[counter];
-	int ret;
+	int ret = 0;
+	u32 val = 0;
 
-	gen8_host_aperture_set(adreno_dev, PIPE_BV, 0, 0);
+	kgsl_regread(device, GEN8_CP_APERTURE_CNTL_HOST, &val);
+	kgsl_regwrite(device, GEN8_CP_APERTURE_CNTL_HOST, FIELD_PREP(GENMASK(15, 12), PIPE_BV));
 
 	ret = gen8_perfcounter_update(adreno_dev, reg, true,
 				FIELD_PREP(GENMASK(15, 12), PIPE_BV), group->flags);
 
-	gen8_host_aperture_set(adreno_dev, 0, 0, 0);
+	kgsl_regwrite(device, GEN8_CP_APERTURE_CNTL_HOST, val);
+
+	/* Ensure all writes are posted before reading the piped register */
+	mb();
 
 	if (!ret)
 		reg->value = 0;
@@ -117,25 +134,13 @@ static u64 gen8_counter_read(struct adreno_device *adreno_dev,
 	return (((u64) hi) << 32) | lo;
 }
 
-/*
- * For registers that do not get restored on power cycle, read the value and add
- * the stored shadow value
- */
-static u64 gen8_counter_read_norestore(struct adreno_device *adreno_dev,
-		const struct adreno_perfcount_group *group, u32 counter)
-{
-	struct adreno_perfcount_register *reg = &group->regs[counter];
-
-	return gen8_counter_read(adreno_dev, group, counter) + reg->value;
-}
-
 static int gen8_counter_gbif_enable(struct adreno_device *adreno_dev,
 		const struct adreno_perfcount_group *group,
 		u32 counter, u32 countable)
 {
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	struct adreno_perfcount_register *reg = &group->regs[counter];
-	u32 shift = (counter % 4) << 3;
+	u32 shift = counter << 3;
 	u32 select = BIT(counter);
 
 	if (countable > 0xff)
@@ -164,7 +169,7 @@ static int gen8_counter_gbif_pwr_enable(struct adreno_device *adreno_dev,
 {
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	struct adreno_perfcount_register *reg = &group->regs[counter];
-	u32 shift = (counter % 4) << 3;
+	u32 shift = counter << 3;
 	u32 select = BIT(16 + counter);
 
 	if (countable > 0xff)

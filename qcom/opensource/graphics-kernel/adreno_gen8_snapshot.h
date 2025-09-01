@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #ifndef __ADRENO_GEN8_SNAPSHOT_H
 #define __ADRENO_GEN8_SNAPSHOT_H
@@ -40,19 +40,15 @@ enum location_id {
 #define UNSLICE                 0
 #define SLICE                   1
 
-#define NUMBER_OF_SLICES(region, adreno_dev) \
-	((region == SLICE) ? gen8_get_num_slices(adreno_dev) : 1)
+#define MAX_PHYSICAL_SLICES     1
 
-/* Use SLICE_ID to access the region (0 for unsliced) */
-#define SLICE_ID(region, j) ((region == SLICE) ? j : 0)
-
-/*
- * Use HEADER_SLICE_ID to specify the slice in the section header (UINT_MAX for unsliced).
- * This allows snapshot parsers to differentiate between slice ID 0 and unsliced regions.
- */
-#define HEADER_SLICE_ID(region, j) ((region == SLICE) ? j : UINT_MAX)
+#define NUMBER_OF_SLICES(region) ((region == SLICE) ? MAX_PHYSICAL_SLICES : 1)
+#define SLICE_ID(region, j) ((region == SLICE) ? j : UINT_MAX)
 
 #define GEN8_DEBUGBUS_BLOCK_SIZE 0x100
+
+/* Number of dword to dump in snapshot for CP SQE */
+#define GEN8_SQE_FW_SNAPSHOT_DWORDS 5
 
 struct sel_reg {
 	u32 host_reg;
@@ -84,8 +80,8 @@ struct gen8_shader_block {
 	u32 pipeid;
 	/* location: Location identifier for the block data */
 	u32 location;
-	/* slice_region: slice region, if SLICE then loop over all slices */
-	u32 slice_region;
+	/* num_slices: the number of slices to dump */
+	u32 num_slices;
 	/* num_ctx: repeat id to loop */
 	u32 num_ctx;
 	/* offset: The offset in the snasphot dump */

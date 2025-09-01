@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
- * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * Copyright (c) 2023-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
-#include <dt-bindings/power/qcom-rpmpd.h>
+#include <dt-bindings/regulator/qcom,rpmh-regulator-levels.h>
 #include <linux/clk.h>
 #include <linux/component.h>
 #include <linux/delay.h>
@@ -14,8 +14,10 @@
 #include <linux/io.h>
 #include <linux/kobject.h>
 #include <linux/of_platform.h>
+#include <linux/qcom-iommu-util.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
+#include <linux/soc/qcom/llcc-qcom.h>
 #include <linux/sysfs.h>
 #include <soc/qcom/cmd-db.h>
 
@@ -288,9 +290,8 @@ int gen8_gmu_device_start(struct adreno_device *adreno_dev)
 
 	if (gmu_core_timed_poll_check(device, GEN8_GMUCX_CM3_FW_INIT_RESULT,
 			BIT(8), 100, GENMASK(8, 0))) {
-		dev_err(GMU_PDEV_DEV(device),
-			"GMU failed to come out of reset\n");
-		gmu_core_fault_snapshot(device, GMU_FAULT_DEVICE_START);
+		dev_err(&gmu->pdev->dev, "GMU failed to come out of reset\n");
+		gmu_core_fault_snapshot(device);
 		return -ETIMEDOUT;
 	}
 
@@ -303,14 +304,15 @@ int gen8_gmu_device_start(struct adreno_device *adreno_dev)
  */
 int gen8_gmu_hfi_start(struct adreno_device *adreno_dev)
 {
+	struct gen8_gmu_device *gmu = to_gen8_gmu(adreno_dev);
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 
 	gmu_core_regwrite(device, GEN8_GMUCX_HFI_CTRL_INIT, 1);
 
 	if (gmu_core_timed_poll_check(device, GEN8_GMUCX_HFI_CTRL_STATUS,
 			BIT(0), 100, BIT(0))) {
-		dev_err(GMU_PDEV_DEV(device), "GMU HFI init failed\n");
-		gmu_core_fault_snapshot(device, GMU_FAULT_HFI_INIT);
+		dev_err(&gmu->pdev->dev, "GMU HFI init failed\n");
+		gmu_core_fault_snapshot(device);
 		return -ETIMEDOUT;
 	}
 
@@ -321,6 +323,7 @@ int gen8_rscc_wakeup_sequence(struct adreno_device *adreno_dev)
 {
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	struct gen8_gmu_device *gmu = to_gen8_gmu(adreno_dev);
+	struct device *dev = &gmu->pdev->dev;
 
 	/* Skip wakeup sequence if we didn't do the sleep sequence */
 	if (!test_bit(GMU_PRIV_RSCC_SLEEP_DONE, &gmu->flags))
@@ -334,14 +337,13 @@ int gen8_rscc_wakeup_sequence(struct adreno_device *adreno_dev)
 
 	if (gmu_core_timed_poll_check(device, GEN8_GMUAO_RSCC_CONTROL_ACK,
 				BIT(1), 100, BIT(1))) {
-		dev_err(GMU_PDEV_DEV(device), "Failed to do GPU RSC power on\n");
+		dev_err(dev, "Failed to do GPU RSC power on\n");
 		return -ETIMEDOUT;
 	}
 
 	if (gen8_timed_poll_check_rscc(gmu, GEN8_RSCC_SEQ_BUSY_DRV0,
 				0x0, 100, UINT_MAX)) {
-		dev_err(GMU_PDEV_DEV(device),
-			"GPU RSC sequence stuck in waking up GPU\n");
+		dev_err(dev, "GPU RSC sequence stuck in waking up GPU\n");
 		return -ETIMEDOUT;
 	}
 
@@ -377,7 +379,7 @@ int gen8_rscc_sleep_sequence(struct adreno_device *adreno_dev)
 	ret = gen8_timed_poll_check_rscc(gmu, GEN8_GPU_RSCC_RSC_STATUS0_DRV0,
 			BIT(16), 100, BIT(16));
 	if (ret) {
-		dev_err(GMU_PDEV_DEV(device), "GPU RSC power off fail\n");
+		dev_err(&gmu->pdev->dev, "GPU RSC power off fail\n");
 		return -ETIMEDOUT;
 	}
 
@@ -432,7 +434,6 @@ static void load_tcm(struct adreno_device *adreno_dev, const u8 *src,
 int gen8_gmu_load_fw(struct adreno_device *adreno_dev)
 {
 	struct gen8_gmu_device *gmu = to_gen8_gmu(adreno_dev);
-	struct device *gmu_pdev_dev = GMU_PDEV_DEV(KGSL_DEVICE(adreno_dev));
 	const u8 *fw = (const u8 *)gmu->fw_image->data;
 
 	while (fw < gmu->fw_image->data + gmu->fw_image->size) {
@@ -449,7 +450,7 @@ int gen8_gmu_load_fw(struct adreno_device *adreno_dev)
 		id = find_vma_block(gmu, blk->addr, blk->size);
 
 		if (id < 0) {
-			dev_err(gmu_pdev_dev,
+			dev_err(&gmu->pdev->dev,
 				"Unknown block in GMU FW addr:0x%x size:0x%x\n",
 				blk->addr, blk->size);
 			return -EINVAL;
@@ -468,7 +469,7 @@ int gen8_gmu_load_fw(struct adreno_device *adreno_dev)
 				find_gmu_memdesc(gmu, blk->addr, blk->size);
 
 			if (!md) {
-				dev_err(gmu_pdev_dev,
+				dev_err(&gmu->pdev->dev,
 					"No backing memory for GMU FW block addr:0x%x size:0x%x\n",
 					blk->addr, blk->size);
 				return -EINVAL;
@@ -512,7 +513,9 @@ static void trigger_reset_recovery(struct adreno_device *adreno_dev,
 	if (req != oob_perfcntr)
 		return;
 
-	adreno_scheduler_fault(adreno_dev, ADRENO_GMU_FAULT_SKIP_SNAPSHOT);
+	if (adreno_dev->dispatch_ops && adreno_dev->dispatch_ops->fault)
+		adreno_dev->dispatch_ops->fault(adreno_dev,
+			ADRENO_GMU_FAULT_SKIP_SNAPSHOT);
 }
 
 int gen8_gmu_oob_set(struct kgsl_device *device,
@@ -527,7 +530,7 @@ int gen8_gmu_oob_set(struct kgsl_device *device,
 		return 0;
 
 	if (req >= oob_boot_slumber) {
-		dev_err(GMU_PDEV_DEV(device),
+		dev_err(&gmu->pdev->dev,
 			"Unsupported OOB request %s\n",
 			oob_to_str(req));
 		return -EINVAL;
@@ -542,9 +545,9 @@ int gen8_gmu_oob_set(struct kgsl_device *device,
 				100, check)) {
 		if (req == oob_perfcntr)
 			gmu->num_oob_perfcntr--;
-		WARN(1, "OOB request %s timed out\n", oob_to_str(req));
+		gmu_core_fault_snapshot(device);
 		ret = -ETIMEDOUT;
-		gmu_core_fault_snapshot(device, GMU_FAULT_OOB_SET);
+		WARN(1, "OOB request %s timed out\n", oob_to_str(req));
 		trigger_reset_recovery(adreno_dev, req);
 	}
 
@@ -565,7 +568,7 @@ void gen8_gmu_oob_clear(struct kgsl_device *device,
 		return;
 
 	if (req >= oob_boot_slumber) {
-		dev_err(GMU_PDEV_DEV(device), "Unsupported OOB clear %s\n",
+		dev_err(&gmu->pdev->dev, "Unsupported OOB clear %s\n",
 				oob_to_str(req));
 		return;
 	}
@@ -597,8 +600,8 @@ void gen8_gmu_irq_enable(struct adreno_device *adreno_dev)
 		return;
 
 	/* Clear pending IRQs, unmask needed interrupts and enable CX host IRQ */
-	kgsl_regwrite(device, GEN8_GPU_CX_MISC_INT_CLEAR_CMD, UINT_MAX);
-	kgsl_regwrite(device, GEN8_GPU_CX_MISC_INT_0_MASK, GEN8_CX_MISC_INT_MASK);
+	adreno_cx_misc_regwrite(adreno_dev, GEN8_GPU_CX_MISC_INT_CLEAR_CMD, UINT_MAX);
+	adreno_cx_misc_regwrite(adreno_dev, GEN8_GPU_CX_MISC_INT_0_MASK, GEN8_CX_MISC_INT_MASK);
 	enable_irq(device->cx_host_irq_num);
 }
 
@@ -624,8 +627,8 @@ void gen8_gmu_irq_disable(struct adreno_device *adreno_dev)
 
 	/* Disable CX host IRQ, mask all interrupts and clear pending IRQs */
 	disable_irq(device->cx_host_irq_num);
-	kgsl_regwrite(device, GEN8_GPU_CX_MISC_INT_0_MASK, UINT_MAX);
-	kgsl_regwrite(device, GEN8_GPU_CX_MISC_INT_CLEAR_CMD, UINT_MAX);
+	adreno_cx_misc_regwrite(adreno_dev, GEN8_GPU_CX_MISC_INT_0_MASK, UINT_MAX);
+	adreno_cx_misc_regwrite(adreno_dev, GEN8_GPU_CX_MISC_INT_CLEAR_CMD, UINT_MAX);
 }
 
 static int gen8_gmu_hfi_start_msg(struct adreno_device *adreno_dev)
@@ -656,7 +659,6 @@ static u32 gen8_rscc_tcsm_drv0_status_reglist[] = {
 static int gen8_complete_rpmh_votes(struct gen8_gmu_device *gmu,
 		u32 timeout)
 {
-	struct kgsl_device *device = KGSL_DEVICE(gen8_gmu_to_adreno(gmu));
 	int i, ret = 0;
 
 	for (i = 0; i < ARRAY_SIZE(gen8_rscc_tcsm_drv0_status_reglist); i++)
@@ -665,7 +667,7 @@ static int gen8_complete_rpmh_votes(struct gen8_gmu_device *gmu,
 			BIT(0));
 
 	if (ret)
-		dev_err(GMU_PDEV_DEV(device), "RPMH votes timedout: %d\n", ret);
+		dev_err(&gmu->pdev->dev, "RPMH votes timedout: %d\n", ret);
 
 	return ret;
 }
@@ -704,7 +706,6 @@ static const char *idle_level_name(int level)
 int gen8_gmu_wait_for_lowest_idle(struct adreno_device *adreno_dev)
 {
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
-	struct device *gmu_pdev_dev = GMU_PDEV_DEV(device);
 	struct gen8_gmu_device *gmu = to_gen8_gmu(adreno_dev);
 	const struct adreno_gpudev *gpudev = ADRENO_GPU_DEVICE(adreno_dev);
 	u32 reg, reg1, reg2, reg3, reg4;
@@ -750,19 +751,15 @@ int gen8_gmu_wait_for_lowest_idle(struct adreno_device *adreno_dev)
 	gmu_core_regread(device, GEN8_GMUAO_RBBM_INT_UNMASKED_STATUS_SHADOW, &reg3);
 	gmu_core_regread(device, GEN8_GMUCX_PWR_COL_KEEPALIVE, &reg4);
 
-	dev_err(gmu_pdev_dev,
+	dev_err(&gmu->pdev->dev,
 		"----------------------[ GMU error ]----------------------\n");
-	dev_err(gmu_pdev_dev,
-		"Timeout waiting for lowest idle level %s\n",
+	dev_err(&gmu->pdev->dev, "Timeout waiting for lowest idle level %s\n",
 		idle_level_name(gmu->idle_level));
-	dev_err(gmu_pdev_dev, "Start: %llx (absolute ticks)\n", ts1);
-	dev_err(gmu_pdev_dev,
-		"Poll: %llx (ticks relative to start)\n", ts2-ts1);
-	dev_err(gmu_pdev_dev,
-		"RPMH_POWER_STATE=%x GFX_PWR_CLK_STATUS=%x\n", reg, reg1);
-	dev_err(gmu_pdev_dev, "CX_BUSY_STATUS=%x\n", reg2);
-	dev_err(gmu_pdev_dev,
-		"RBBM_INT_UNMASKED_STATUS=%x PWR_COL_KEEPALIVE=%x\n", reg3, reg4);
+	dev_err(&gmu->pdev->dev, "Start: %llx (absolute ticks)\n", ts1);
+	dev_err(&gmu->pdev->dev, "Poll: %llx (ticks relative to start)\n", ts2-ts1);
+	dev_err(&gmu->pdev->dev, "RPMH_POWER_STATE=%x GFX_PWR_CLK_STATUS=%x\n", reg, reg1);
+	dev_err(&gmu->pdev->dev, "CX_BUSY_STATUS=%x\n", reg2);
+	dev_err(&gmu->pdev->dev, "RBBM_INT_UNMASKED_STATUS=%x PWR_COL_KEEPALIVE=%x\n", reg3, reg4);
 
 	/* Access GX registers only when GX is ON */
 	if (is_on(reg1)) {
@@ -773,14 +770,12 @@ int gen8_gmu_wait_for_lowest_idle(struct adreno_device *adreno_dev)
 		kgsl_regread(device, GEN8_CP_CP2GMU_STATUS, &reg2);
 		kgsl_regread(device, GEN8_CP_CONTEXT_SWITCH_CNTL, &reg3);
 
-		dev_err(gmu_pdev_dev,
-			"GEN8_CP_PIPE_STATUS_PIPE BV:%x BR:%x\n", reg, reg1);
-		dev_err(gmu_pdev_dev,
-			"CP2GMU_STATUS=%x CONTEXT_SWITCH_CNTL=%x\n", reg2, reg3);
+		dev_err(&gmu->pdev->dev, "GEN8_CP_PIPE_STATUS_PIPE BV:%x BR:%x\n", reg, reg1);
+		dev_err(&gmu->pdev->dev, "CP2GMU_STATUS=%x CONTEXT_SWITCH_CNTL=%x\n", reg2, reg3);
 	}
 
 	WARN_ON(1);
-	gmu_core_fault_snapshot(device, GMU_FAULT_WAIT_FOR_LOWEST_IDLE);
+	gmu_core_fault_snapshot(device);
 	return -ETIMEDOUT;
 }
 
@@ -789,6 +784,7 @@ int gen8_gmu_wait_for_lowest_idle(struct adreno_device *adreno_dev)
 int gen8_gmu_wait_for_idle(struct adreno_device *adreno_dev)
 {
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+	struct gen8_gmu_device *gmu = to_gen8_gmu(adreno_dev);
 	const struct adreno_gpudev *gpudev = ADRENO_GPU_DEVICE(adreno_dev);
 	u32 status2;
 	u64 ts1;
@@ -798,11 +794,11 @@ int gen8_gmu_wait_for_idle(struct adreno_device *adreno_dev)
 			0, 100, CXGXCPUBUSYIGNAHB)) {
 		gmu_core_regread(device,
 				GEN8_GMUAO_GPU_CX_BUSY_STATUS2, &status2);
-		dev_err(GMU_PDEV_DEV(device),
+		dev_err(&gmu->pdev->dev,
 				"GMU not idling: status2=0x%x %llx %llx\n",
 				status2, ts1,
 				gpudev->read_alwayson(adreno_dev));
-		gmu_core_fault_snapshot(device, GMU_FAULT_WAIT_FOR_IDLE);
+		gmu_core_fault_snapshot(device);
 		return -ETIMEDOUT;
 	}
 
@@ -829,7 +825,7 @@ int gen8_gmu_version_info(struct adreno_device *adreno_dev)
 
 	/* Check if gmu fw version on device is compatible with kgsl driver */
 	if (gmu->ver.core < gen8_core->gmu_fw_version) {
-		dev_err_once(GMU_PDEV_DEV(device),
+		dev_err_once(&gmu->pdev->dev,
 			     "GMU FW version 0x%x error (expected 0x%x)\n",
 			     gmu->ver.core, gen8_core->gmu_fw_version);
 		return -EINVAL;
@@ -1030,11 +1026,9 @@ static int _map_gmu_dynamic(struct gen8_gmu_device *gmu,
 	struct kgsl_memdesc *md,
 	u32 addr, u32 vma_id, int attrs, u32 align)
 {
-	struct kgsl_device *device = KGSL_DEVICE(gen8_gmu_to_adreno(gmu));
-	struct device *gmu_pdev_dev = GMU_PDEV_DEV(device);
+	int ret;
 	struct gmu_vma_entry *vma = &gmu->vma[vma_id];
 	struct gmu_vma_node *vma_node = NULL;
-	int ret;
 	u32 size = ALIGN(md->size, hfi_get_gmu_sz_alignment(align));
 
 	spin_lock(&vma->lock);
@@ -1046,7 +1040,7 @@ static int _map_gmu_dynamic(struct gen8_gmu_device *gmu,
 		addr = find_unmapped_va(vma, size, hfi_get_gmu_va_alignment(align));
 		if (addr == 0) {
 			spin_unlock(&vma->lock);
-			dev_err(gmu_pdev_dev,
+			dev_err(&gmu->pdev->dev,
 				"Insufficient VA space size: %x\n", size);
 			return -ENOMEM;
 		}
@@ -1055,19 +1049,19 @@ static int _map_gmu_dynamic(struct gen8_gmu_device *gmu,
 	ret = insert_va(vma, addr, size);
 	spin_unlock(&vma->lock);
 	if (ret < 0) {
-		dev_err(gmu_pdev_dev,
+		dev_err(&gmu->pdev->dev,
 			"Could not insert va: %x size %x\n", addr, size);
 		return ret;
 	}
 
-	ret = gmu_core_map_memdesc(device->gmu_core.domain, md, addr, attrs);
+	ret = gmu_core_map_memdesc(gmu->domain, md, addr, attrs);
 	if (!ret) {
 		md->gmuaddr = addr;
 		return 0;
 	}
 
 	/* Failed to map to GMU */
-	dev_err(gmu_pdev_dev,
+	dev_err(&gmu->pdev->dev,
 		"Unable to map GMU kernel block: addr:0x%08x size:0x%llx :%d\n",
 		addr, md->size, ret);
 
@@ -1085,17 +1079,16 @@ static int _map_gmu_static(struct gen8_gmu_device *gmu,
 	struct kgsl_memdesc *md,
 	u32 addr, u32 vma_id, int attrs, u32 align)
 {
-	struct kgsl_device *device = KGSL_DEVICE(gen8_gmu_to_adreno(gmu));
-	struct gmu_vma_entry *vma = &gmu->vma[vma_id];
 	int ret;
+	struct gmu_vma_entry *vma = &gmu->vma[vma_id];
 	u32 size = ALIGN(md->size, hfi_get_gmu_sz_alignment(align));
 
 	if (!addr)
 		addr = ALIGN(vma->next_va, hfi_get_gmu_va_alignment(align));
 
-	ret = gmu_core_map_memdesc(device->gmu_core.domain, md, addr, attrs);
+	ret = gmu_core_map_memdesc(gmu->domain, md, addr, attrs);
 	if (ret) {
-		dev_err(GMU_PDEV_DEV(device),
+		dev_err(&gmu->pdev->dev,
 			"Unable to map GMU kernel block: addr:0x%08x size:0x%llx :%d\n",
 			addr, md->size, ret);
 		return ret;
@@ -1167,7 +1160,7 @@ struct kgsl_memdesc *gen8_reserve_gmu_kernel_block_fixed(struct gen8_gmu_device 
 
 	md = &gmu->gmu_globals[gmu->global_entries];
 
-	ret = kgsl_memdesc_init_fixed(device, GMU_PDEV(device), resource, md);
+	ret = kgsl_memdesc_init_fixed(device, gmu->pdev, resource, md);
 	if (ret)
 		return ERR_PTR(ret);
 
@@ -1180,7 +1173,7 @@ struct kgsl_memdesc *gen8_reserve_gmu_kernel_block_fixed(struct gen8_gmu_device 
 	if (!ret)
 		gmu->global_entries++;
 	else {
-		dev_err(GMU_PDEV_DEV(device),
+		dev_err(&gmu->pdev->dev,
 			"Unable to map GMU kernel block: addr:0x%08x size:0x%llx :%d\n",
 			addr, md->size, ret);
 		memset(md, 0x0, sizeof(*md));
@@ -1211,7 +1204,6 @@ void gen8_free_gmu_block(struct gen8_gmu_device *gmu, struct kgsl_memdesc *md)
 	int vma_id = find_vma_block(gmu, md->gmuaddr, md->size);
 	struct gmu_vma_entry *vma;
 	struct gmu_vma_node *vma_node;
-	struct kgsl_device *device = KGSL_DEVICE(gen8_gmu_to_adreno(gmu));
 
 	if ((vma_id < 0) || !vma_is_dynamic(vma_id))
 		return;
@@ -1222,8 +1214,7 @@ void gen8_free_gmu_block(struct gen8_gmu_device *gmu, struct kgsl_memdesc *md)
 	 * Do not remove the vma node if we failed to unmap the entire buffer. This is because the
 	 * iommu driver considers remapping an already mapped iova as fatal.
 	 */
-	if (md->size !=
-			iommu_unmap(device->gmu_core.domain, md->gmuaddr, md->size))
+	if (md->size != iommu_unmap(gmu->domain, md->gmuaddr, md->size))
 		goto free;
 
 	spin_lock(&vma->lock);
@@ -1239,12 +1230,12 @@ free:
 static int gen8_gmu_process_prealloc(struct gen8_gmu_device *gmu,
 	struct gmu_block_header *blk)
 {
-	struct kgsl_device *device = KGSL_DEVICE(gen8_gmu_to_adreno(gmu));
 	struct kgsl_memdesc *md;
+
 	int id = find_vma_block(gmu, blk->addr, blk->value);
 
 	if (id < 0) {
-		dev_err(GMU_PDEV_DEV(device),
+		dev_err(&gmu->pdev->dev,
 			"Invalid prealloc block addr: 0x%x value:%d\n",
 			blk->addr, blk->value);
 		return id;
@@ -1266,7 +1257,6 @@ static int gen8_gmu_process_prealloc(struct gen8_gmu_device *gmu,
 
 int gen8_gmu_parse_fw(struct adreno_device *adreno_dev)
 {
-	struct device *gmu_pdev_dev = GMU_PDEV_DEV(KGSL_DEVICE(adreno_dev));
 	struct gen8_gmu_device *gmu = to_gen8_gmu(adreno_dev);
 	const struct adreno_gen8_core *gen8_core = to_gen8_core(adreno_dev);
 	struct gmu_block_header *blk;
@@ -1286,10 +1276,10 @@ int gen8_gmu_parse_fw(struct adreno_device *adreno_dev)
 			return -EINVAL;
 
 		ret = request_firmware(&gmu->fw_image, gmufw_name,
-				gmu_pdev_dev);
+				&gmu->pdev->dev);
 		if (ret) {
-			dev_err(gmu_pdev_dev,
-					"request_firmware (%s) failed: %d\n", gmufw_name, ret);
+			dev_err(&gmu->pdev->dev, "request_firmware (%s) failed: %d\n",
+					gmufw_name, ret);
 			return ret;
 		}
 	}
@@ -1303,7 +1293,7 @@ int gen8_gmu_parse_fw(struct adreno_device *adreno_dev)
 		blk = (struct gmu_block_header *)&gmu->fw_image->data[offset];
 
 		if (offset + sizeof(*blk) > gmu->fw_image->size) {
-			dev_err(gmu_pdev_dev, "Invalid FW Block\n");
+			dev_err(&gmu->pdev->dev, "Invalid FW Block\n");
 			return -EINVAL;
 		}
 
@@ -1388,8 +1378,10 @@ static void _do_gbif_halt(struct kgsl_device *device, u32 reg, u32 ack_reg,
 
 static void gen8_gmu_pwrctrl_suspend(struct adreno_device *adreno_dev)
 {
+	int ret = 0;
 	struct gen8_gmu_device *gmu = to_gen8_gmu(adreno_dev);
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
 
 	/* Disconnect GPU from BUS is not needed if CX GDSC goes off later */
 
@@ -1411,27 +1403,50 @@ static void gen8_gmu_pwrctrl_suspend(struct adreno_device *adreno_dev)
 
 	gmu_core_regwrite(device, GEN8_GMUCX_CM3_SYSRESET, 1);
 
+	/* Halt GX traffic */
+	if (gen8_gmu_gx_is_on(adreno_dev))
+		_do_gbif_halt(device, GEN8_RBBM_GBIF_HALT,
+				GEN8_RBBM_GBIF_HALT_ACK,
+				GEN8_GBIF_GX_HALT_MASK,
+				"GX");
+
 	/* Halt CX traffic */
 	_do_gbif_halt(device, GEN8_GBIF_HALT, GEN8_GBIF_HALT_ACK,
 			GEN8_GBIF_ARB_HALT_MASK, "CX");
 
-	/*
-	 * Switch gx gdsc control from GMU to CPU force non-zero reference
-	 * count in clk driver so next disable call will turn off the GDSC
-	 */
-	if (gen8_gmu_gx_is_on(adreno_dev)) {
-		kgsl_pwrctrl_enable_gx_gdsc(device);
-		kgsl_pwrctrl_disable_gx_gdsc(device);
-	}
-
-	/*
-	 * Trigger RSC slumber sequence to turn off GMU controlled domains
-	 * (GX, MXC) and remove GPU bus votes
-	 */
-	gen8_rscc_sleep_sequence(adreno_dev);
-
 	if (gen8_gmu_gx_is_on(adreno_dev))
-		dev_err(GMU_PDEV_DEV(device), "gx is stuck on\n");
+		kgsl_regwrite(device, GEN8_RBBM_SW_RESET_CMD, 0x1);
+
+	/* Allow the software reset to complete */
+	udelay(100);
+
+	/*
+	 * This is based on the assumption that GMU is the only one controlling
+	 * the GX HS. This code path is the only client voting for GX through
+	 * the regulator interface.
+	 */
+	if (pwr->gx_gdsc) {
+		if (gen8_gmu_gx_is_on(adreno_dev)) {
+			/* Switch gx gdsc control from GMU to CPU
+			 * force non-zero reference count in clk driver
+			 * so next disable call will turn
+			 * off the GDSC
+			 */
+			ret = regulator_enable(pwr->gx_gdsc);
+			if (ret)
+				dev_err(&gmu->pdev->dev,
+					"suspend fail: gx enable %d\n", ret);
+
+			ret = regulator_disable(pwr->gx_gdsc);
+			if (ret)
+				dev_err(&gmu->pdev->dev,
+					"suspend fail: gx disable %d\n", ret);
+
+			if (gen8_gmu_gx_is_on(adreno_dev))
+				dev_err(&gmu->pdev->dev,
+					"gx is stuck on\n");
+		}
+	}
 }
 
 /*
@@ -1452,7 +1467,7 @@ static int gen8_gmu_notify_slumber(struct adreno_device *adreno_dev)
 	};
 	int ret;
 
-	req.bw |= adreno_gmu_bus_ab_quantize(adreno_dev, 0);
+	req.bw |= gen8_bus_ab_quantize(adreno_dev, 0);
 
 	/* Disable the power counter so that the GMU is not busy */
 	gmu_core_regwrite(device, GEN8_GMUCX_POWER_COUNTER_ENABLE, 0);
@@ -1488,7 +1503,7 @@ void gen8_gmu_suspend(struct adreno_device *adreno_dev)
 
 	gen8_rdpm_cx_freq_update(gmu, 0);
 
-	dev_err(GMU_PDEV_DEV(device), "Suspended GMU\n");
+	dev_err(&gmu->pdev->dev, "Suspended GMU\n");
 
 	kgsl_pwrctrl_set_state(device, KGSL_STATE_NONE);
 }
@@ -1521,7 +1536,7 @@ static int gen8_gmu_dcvs_set(struct adreno_device *adreno_dev,
 	if (bus_level < pwr->ddr_table_count && bus_level > 0)
 		req.bw = bus_level;
 
-	req.bw |= adreno_gmu_bus_ab_quantize(adreno_dev, ab);
+	req.bw |=  gen8_bus_ab_quantize(adreno_dev, ab);
 
 	/* GMU will vote for slumber levels through the sleep sequence */
 	if ((req.freq == INVALID_DCVS_IDX) && (req.bw == INVALID_BW_VOTE))
@@ -1533,8 +1548,8 @@ static int gen8_gmu_dcvs_set(struct adreno_device *adreno_dev,
 
 	ret = gen8_hfi_send_generic_req(adreno_dev, &req, sizeof(req));
 	if (ret) {
-		dev_err_ratelimited(GMU_PDEV_DEV(device),
-			"Failed to set GPU perf idx %u, bw idx %u\n",
+		dev_err_ratelimited(&gmu->pdev->dev,
+			"Failed to set GPU perf idx %d, bw idx %d\n",
 			req.freq, req.bw);
 
 		/*
@@ -1542,7 +1557,7 @@ static int gen8_gmu_dcvs_set(struct adreno_device *adreno_dev,
 		 * dispatcher based reset and recovery.
 		 */
 		if (test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags))
-			adreno_scheduler_fault(adreno_dev, ADRENO_GMU_FAULT |
+			adreno_dispatcher_fault(adreno_dev, ADRENO_GMU_FAULT |
 				ADRENO_GMU_FAULT_SKIP_SNAPSHOT);
 	}
 
@@ -1589,12 +1604,9 @@ static u32 gen8_gmu_ifpc_isenabled(struct kgsl_device *device)
 }
 
 /* Send an NMI to the GMU */
-void gen8_gmu_send_nmi(struct kgsl_device *device, bool force,
-		       enum gmu_fault_panic_policy gf_policy)
+void gen8_gmu_send_nmi(struct kgsl_device *device, bool force)
 {
 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
-	const struct adreno_gpudev *gpudev = ADRENO_GPU_DEVICE(adreno_dev);
-	u64 ticks = gpudev->read_alwayson(adreno_dev);
 	struct gen8_gmu_device *gmu = to_gen8_gmu(adreno_dev);
 	u32 result;
 
@@ -1603,9 +1615,9 @@ void gen8_gmu_send_nmi(struct kgsl_device *device, bool force,
 	 * to save cm3 state to DDR.
 	 */
 	if (gen8_gmu_gx_is_on(adreno_dev) && adreno_smmu_is_stalled(adreno_dev)) {
-		dev_err(GMU_PDEV_DEV(device),
+		dev_err(&gmu->pdev->dev,
 			"Skipping NMI because SMMU is stalled\n");
-		goto done;
+		return;
 	}
 
 	if (force)
@@ -1645,14 +1657,12 @@ nmi:
 
 	/* Wait for the NMI to be handled */
 	udelay(200);
-
-done:
-	KGSL_GMU_CORE_FORCE_PANIC(device->gmu_core.gf_panic,
-			GMU_PDEV(device), ticks, gf_policy);
 }
 
 static void gen8_gmu_cooperative_reset(struct kgsl_device *device)
 {
+	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+	struct gen8_gmu_device *gmu = to_gen8_gmu(adreno_dev);
 	u32 result;
 
 	gmu_core_regwrite(device, GEN8_GMUCX_WDOG_CTRL, 0);
@@ -1667,28 +1677,29 @@ static void gen8_gmu_cooperative_reset(struct kgsl_device *device)
 		return;
 
 	gmu_core_regread(device, GEN8_GMUCX_CM3_FW_INIT_RESULT, &result);
-	dev_err(GMU_PDEV_DEV(device),
+	dev_err(&gmu->pdev->dev,
 		"GMU cooperative reset timed out 0x%x\n", result);
 	/*
 	 * If we dont get a snapshot ready from GMU, trigger NMI
 	 * and if we still timeout then we just continue with reset.
 	 */
-	gen8_gmu_send_nmi(device, true, GMU_FAULT_PANIC_NONE);
+	gen8_gmu_send_nmi(device, true);
 
 	gmu_core_regread(device, GEN8_GMUCX_CM3_FW_INIT_RESULT, &result);
 	if ((result & 0x800) != 0x800)
-		dev_err(GMU_PDEV_DEV(device),
+		dev_err(&gmu->pdev->dev,
 			"GMU cooperative reset NMI timed out 0x%x\n", result);
 }
 
 static int gen8_gmu_wait_for_active_transition(struct kgsl_device *device)
 {
 	u32 reg;
+	struct gen8_gmu_device *gmu = to_gen8_gmu(ADRENO_DEVICE(device));
 
 	if (gmu_core_timed_poll_check(device, GEN8_GMUCX_RPMH_POWER_STATE,
 			GPU_HW_ACTIVE, 100, GENMASK(3, 0))) {
 		gmu_core_regread(device, GEN8_GMUCX_RPMH_POWER_STATE, &reg);
-		dev_err(GMU_PDEV_DEV(device),
+		dev_err(&gmu->pdev->dev,
 			"GMU failed to move to ACTIVE state, Current state: 0x%x\n",
 			reg);
 
@@ -1705,6 +1716,7 @@ static bool gen8_gmu_scales_bandwidth(struct kgsl_device *device)
 
 void gen8_gmu_handle_watchdog(struct adreno_device *adreno_dev)
 {
+	struct gen8_gmu_device *gmu = to_gen8_gmu(adreno_dev);
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	u32 mask;
 
@@ -1713,9 +1725,9 @@ void gen8_gmu_handle_watchdog(struct adreno_device *adreno_dev)
 	gmu_core_regwrite(device, GEN8_GMUAO_AO_HOST_INTERRUPT_MASK,
 			(mask | GMU_INT_WDOG_BITE));
 
-	gen8_gmu_send_nmi(device, false, GMU_FAULT_PANIC_NONE);
+	gen8_gmu_send_nmi(device, false);
 
-	dev_err_ratelimited(GMU_PDEV_DEV(device),
+	dev_err_ratelimited(&gmu->pdev->dev,
 			"GMU watchdog expired interrupt received\n");
 }
 
@@ -1723,6 +1735,7 @@ static irqreturn_t gen8_gmu_irq_handler(int irq, void *data)
 {
 	struct kgsl_device *device = data;
 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+	struct gen8_gmu_device *gmu = to_gen8_gmu(adreno_dev);
 	const struct gen8_gpudev *gen8_gpudev =
 		to_gen8_gpudev(ADRENO_GPU_DEVICE(adreno_dev));
 	u32 status = 0;
@@ -1731,7 +1744,7 @@ static irqreturn_t gen8_gmu_irq_handler(int irq, void *data)
 	gmu_core_regwrite(device, GEN8_GMUAO_AO_HOST_INTERRUPT_CLR, status);
 
 	if (status & GMU_INT_HOST_AHB_BUS_ERR)
-		dev_err_ratelimited(GMU_PDEV_DEV(device),
+		dev_err_ratelimited(&gmu->pdev->dev,
 				"AHB bus error interrupt received\n");
 
 	if (status & GMU_INT_WDOG_BITE)
@@ -1742,12 +1755,12 @@ static irqreturn_t gen8_gmu_irq_handler(int irq, void *data)
 
 		gmu_core_regread(device, GEN8_GMUAO_AHB_FENCE_STATUS,
 			&fence_status);
-		dev_err_ratelimited(GMU_PDEV_DEV(device),
+		dev_err_ratelimited(&gmu->pdev->dev,
 			"FENCE error interrupt received %x\n", fence_status);
 	}
 
 	if (status & ~GMU_AO_INT_MASK)
-		dev_err_ratelimited(GMU_PDEV_DEV(device),
+		dev_err_ratelimited(&gmu->pdev->dev,
 				"Unhandled GMU interrupts 0x%lx\n",
 				status & ~GMU_AO_INT_MASK);
 
@@ -1756,7 +1769,6 @@ static irqreturn_t gen8_gmu_irq_handler(int irq, void *data)
 
 void gen8_gmu_aop_send_acd_state(struct gen8_gmu_device *gmu, bool flag)
 {
-	struct kgsl_device *device = KGSL_DEVICE(gen8_gmu_to_adreno(gmu));
 	char msg_buf[36];
 	u32 size;
 	int ret;
@@ -1769,30 +1781,8 @@ void gen8_gmu_aop_send_acd_state(struct gen8_gmu_device *gmu, bool flag)
 
 	ret = qmp_send(gmu->qmp, msg_buf, ALIGN((size + 1), SZ_4));
 	if (ret < 0)
-		dev_err(GMU_PDEV_DEV(device),
+		dev_err(&gmu->pdev->dev,
 			"AOP qmp send message failed: %d\n", ret);
-}
-
-int gen8_gmu_clock_set_rate(struct adreno_device *adreno_dev, u32 req_freq)
-{
-	struct gen8_gmu_device *gmu = to_gen8_gmu(adreno_dev);
-	int ret = 0;
-
-	gen8_rdpm_cx_freq_update(gmu, req_freq / 1000);
-
-	ret = kgsl_clk_set_rate(gmu->clks, gmu->num_clks, "gmu_clk",
-			req_freq);
-	if (ret) {
-		dev_err(GMU_PDEV_DEV(KGSL_DEVICE(adreno_dev)),
-				"GMU clock:%d set failed:%d\n", req_freq, ret);
-		return ret;
-	}
-
-	trace_kgsl_gmu_pwrlevel(req_freq, gmu->cur_freq);
-
-	gmu->cur_freq = req_freq;
-
-	return ret;
 }
 
 int gen8_gmu_enable_clks(struct adreno_device *adreno_dev, u32 level)
@@ -1801,20 +1791,26 @@ int gen8_gmu_enable_clks(struct adreno_device *adreno_dev, u32 level)
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	int ret;
 
-	ret = gen8_gmu_clock_set_rate(adreno_dev, gmu->freqs[level]);
-	if (ret)
+	gen8_rdpm_cx_freq_update(gmu, gmu->freqs[level] / 1000);
+
+	ret = kgsl_clk_set_rate(gmu->clks, gmu->num_clks, "gmu_clk",
+			gmu->freqs[level]);
+	if (ret) {
+		dev_err(&gmu->pdev->dev, "GMU clock:%d set failed:%d\n",
+			gmu->freqs[level], ret);
 		return ret;
+	}
 
 	ret = kgsl_clk_set_rate(gmu->clks, gmu->num_clks, "hub_clk",
 			adreno_dev->gmu_hub_clk_freq);
 	if (ret && ret != -ENODEV) {
-		dev_err(GMU_PDEV_DEV(device), "Unable to set the HUB clock\n");
+		dev_err(&gmu->pdev->dev, "Unable to set the HUB clock\n");
 		return ret;
 	}
 
 	ret = clk_bulk_prepare_enable(gmu->num_clks, gmu->clks);
 	if (ret) {
-		dev_err(GMU_PDEV_DEV(device), "Cannot enable GMU clocks\n");
+		dev_err(&gmu->pdev->dev, "Cannot enable GMU clocks\n");
 		return ret;
 	}
 
@@ -2083,6 +2079,21 @@ static u64 gen8_bcl_sid_get(struct kgsl_device *device, u32 sid_id)
 	}
 }
 
+static void gen8_send_tlb_hint(struct kgsl_device *device, bool val)
+{
+	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+	struct gen8_gmu_device *gmu = to_gen8_gmu(adreno_dev);
+
+	if (!gmu->domain)
+		return;
+
+#if (KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE)
+	qcom_skip_tlb_management(&gmu->pdev->dev, val);
+#endif
+	if (!val)
+		iommu_flush_iotlb_all(gmu->domain);
+}
+
 static const struct gmu_dev_ops gen8_gmudev = {
 	.oob_set = gen8_gmu_oob_set,
 	.oob_clear = gen8_gmu_oob_clear,
@@ -2095,6 +2106,7 @@ static const struct gmu_dev_ops gen8_gmudev = {
 	.bcl_sid_set = gen8_bcl_sid_set,
 	.bcl_sid_get = gen8_bcl_sid_get,
 	.send_nmi = gen8_gmu_send_nmi,
+	.send_tlb_hint = gen8_send_tlb_hint,
 };
 
 static int gen8_gmu_bus_set(struct adreno_device *adreno_dev, int buslevel,
@@ -2107,7 +2119,7 @@ static int gen8_gmu_bus_set(struct adreno_device *adreno_dev, int buslevel,
 	if (buslevel == pwr->cur_buslevel)
 		buslevel = INVALID_DCVS_IDX;
 
-	if ((ab == pwr->cur_ab) || ((ab == 0) && (adreno_dev->gmu_ab)))
+	if ((ab == pwr->cur_ab) || (ab == 0))
 		ab = INVALID_AB_VALUE;
 
 	if ((ab == INVALID_AB_VALUE) && (buslevel == INVALID_DCVS_IDX))
@@ -2131,9 +2143,55 @@ static int gen8_gmu_bus_set(struct adreno_device *adreno_dev, int buslevel,
 	return ret;
 }
 
+u32 gen8_bus_ab_quantize(struct adreno_device *adreno_dev, u32 ab)
+{
+	u16 vote = 0;
+	u32 max_bw, max_ab;
+	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
+
+	if (!adreno_dev->gmu_ab || (ab == INVALID_AB_VALUE))
+		return (FIELD_PREP(GENMASK(31, 16), INVALID_AB_VALUE));
+
+	/*
+	 * max ddr bandwidth (kbps) = (Max bw in kbps per channel * number of channel)
+	 * max ab (Mbps) = max ddr bandwidth (kbps) / 1000
+	 */
+	max_bw = pwr->ddr_table[pwr->ddr_table_count - 1] * adreno_dev->gpucore->num_ddr_channels;
+	max_ab = max_bw / 1000;
+
+	/*
+	 * If requested AB is higher than theoretical max bandwidth, set AB vote as max
+	 * allowable quantized AB value.
+	 *
+	 * Power FW supports a 16 bit AB BW level. We can quantize the entire vote-able BW
+	 * range to a 16 bit space and the quantized value can be used to vote for AB though
+	 * GMU. Quantization can be performed as below.
+	 *
+	 * quantized_vote = (ab vote (kbps) * 2^16) / max ddr bandwidth (kbps)
+	 */
+	if (ab >= max_ab)
+		vote = MAX_AB_VALUE;
+	else
+		vote = (u16)(((u64)ab * 1000 * (1 << 16)) / max_bw);
+
+	/*
+	 * Vote will be calculated as 0 for smaller AB values.
+	 * Set a minimum non-zero vote in such cases.
+	 */
+	if (ab && !vote)
+		vote = 0x1;
+
+	/*
+	 * Set ab enable mask and valid AB vote. req.bw is 32 bit value 0xABABENIB
+	 * and with this return we want to set the upper 16 bits and EN field specifies
+	 * if the AB vote is valid or not.
+	 */
+	return (FIELD_PREP(GENMASK(31, 16), vote) | FIELD_PREP(GENMASK(15, 8), 1));
+}
+
 static void gen8_free_gmu_globals(struct gen8_gmu_device *gmu)
 {
-	struct kgsl_device *device = KGSL_DEVICE(gen8_gmu_to_adreno(gmu));
 	int i;
 
 	for (i = 0; i < gmu->global_entries && i < ARRAY_SIZE(gmu->gmu_globals); i++) {
@@ -2142,18 +2200,18 @@ static void gen8_free_gmu_globals(struct gen8_gmu_device *gmu)
 		if (!md->gmuaddr)
 			continue;
 
-		iommu_unmap(device->gmu_core.domain, md->gmuaddr, md->size);
+		iommu_unmap(gmu->domain, md->gmuaddr, md->size);
 
-		if (TEST_FLAG(KGSL_MEMDESC_SYSMEM, &md->priv))
+		if (md->priv & KGSL_MEMDESC_SYSMEM)
 			kgsl_sharedmem_free(md);
 
 		memset(md, 0, sizeof(*md));
 	}
 
-	if (device->gmu_core.domain) {
-		iommu_detach_device(device->gmu_core.domain, GMU_PDEV_DEV(device));
-		iommu_domain_free(device->gmu_core.domain);
-		device->gmu_core.domain = NULL;
+	if (gmu->domain) {
+		iommu_detach_device(gmu->domain, &gmu->pdev->dev);
+		iommu_domain_free(gmu->domain);
+		gmu->domain = NULL;
 	}
 
 	gmu->global_entries = 0;
@@ -2162,9 +2220,7 @@ static void gen8_free_gmu_globals(struct gen8_gmu_device *gmu)
 static int gen8_gmu_qmp_aoss_init(struct adreno_device *adreno_dev,
 		struct gen8_gmu_device *gmu)
 {
-	struct device *gmu_pdev_dev = GMU_PDEV_DEV(KGSL_DEVICE(adreno_dev));
-
-	gmu->qmp = qmp_get(gmu_pdev_dev);
+	gmu->qmp = qmp_get(&gmu->pdev->dev);
 	if (IS_ERR(gmu->qmp))
 		return PTR_ERR(gmu->qmp);
 
@@ -2211,40 +2267,38 @@ static void gen8_gmu_acd_probe(struct kgsl_device *device,
 
 	ret = gen8_gmu_qmp_aoss_init(adreno_dev, gmu);
 	if (ret)
-		dev_err(GMU_PDEV_DEV(device),
+		dev_err(&gmu->pdev->dev,
 			"AOP qmp init failed: %d\n", ret);
 }
 
 static int gen8_gmu_reg_probe(struct adreno_device *adreno_dev)
 {
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+	struct gen8_gmu_device *gmu = to_gen8_gmu(adreno_dev);
 	int ret;
 
-	ret = kgsl_regmap_add_region(&device->regmap,
-				GMU_PDEV(device), "gmu", NULL, NULL);
+	ret = kgsl_regmap_add_region(&device->regmap, gmu->pdev, "gmu", NULL, NULL);
 
 	if (ret)
-		dev_err(GMU_PDEV_DEV(device), "Unable to map the GMU registers\n");
+		dev_err(&gmu->pdev->dev, "Unable to map the GMU registers\n");
 	/*
 	 * gmu_ao_blk_dec1 and gmu_ao_blk_dec2 are contiguous and contained within the gmu region
 	 * mapped above. gmu_ao_blk_dec0 is not within the gmu region and is mapped separately.
 	 */
-	kgsl_regmap_add_region(&device->regmap, GMU_PDEV(device), "gmu_ao_blk_dec0", NULL, NULL);
+	kgsl_regmap_add_region(&device->regmap, gmu->pdev, "gmu_ao_blk_dec0", NULL, NULL);
 
 	return ret;
 }
 
 static int gen8_gmu_clk_probe(struct adreno_device *adreno_dev)
 {
-	struct platform_device *gmu_pdev = GMU_PDEV(KGSL_DEVICE(adreno_dev));
-	struct device *gmu_pdev_dev = GMU_PDEV_DEV(KGSL_DEVICE(adreno_dev));
 	struct gen8_gmu_device *gmu = to_gen8_gmu(adreno_dev);
 	int ret, i;
 	int tbl_size;
 	int num_freqs;
 	int offset;
 
-	ret = devm_clk_bulk_get_all(gmu_pdev_dev, &gmu->clks);
+	ret = devm_clk_bulk_get_all(&gmu->pdev->dev, &gmu->clks);
 	if (ret < 0)
 		return ret;
 
@@ -2266,7 +2320,7 @@ static int gen8_gmu_clk_probe(struct adreno_device *adreno_dev)
 	gmu->num_clks = ret;
 
 	/* Read the optional list of GMU frequencies */
-	if (of_get_property(gmu_pdev->dev.of_node,
+	if (of_get_property(gmu->pdev->dev.of_node,
 		"qcom,gmu-freq-table", &tbl_size) == NULL)
 		goto default_gmu_freq;
 
@@ -2276,11 +2330,11 @@ static int gen8_gmu_clk_probe(struct adreno_device *adreno_dev)
 
 	for (i = 0; i < num_freqs; i++) {
 		offset = i * 2;
-		ret = of_property_read_u32_index(gmu_pdev->dev.of_node,
+		ret = of_property_read_u32_index(gmu->pdev->dev.of_node,
 			"qcom,gmu-freq-table", offset, &gmu->freqs[i]);
 		if (ret)
 			goto default_gmu_freq;
-		ret = of_property_read_u32_index(gmu_pdev->dev.of_node,
+		ret = of_property_read_u32_index(gmu->pdev->dev.of_node,
 			"qcom,gmu-freq-table", offset + 1, &gmu->vlvls[i]);
 		if (ret)
 			goto default_gmu_freq;
@@ -2333,6 +2387,60 @@ void gen8_gmu_remove(struct kgsl_device *device)
 	kobject_put(&gmu->stats_kobj);
 }
 
+static int gen8_gmu_iommu_fault_handler(struct iommu_domain *domain,
+		struct device *dev, unsigned long addr, int flags, void *token)
+{
+	char *fault_type = "unknown";
+
+	if (flags & IOMMU_FAULT_TRANSLATION)
+		fault_type = "translation";
+	else if (flags & IOMMU_FAULT_PERMISSION)
+		fault_type = "permission";
+	else if (flags & IOMMU_FAULT_EXTERNAL)
+		fault_type = "external";
+	else if (flags & IOMMU_FAULT_TRANSACTION_STALLED)
+		fault_type = "transaction stalled";
+
+	dev_err(dev, "GMU fault addr = %lX, context=kernel (%s %s fault)\n",
+			addr,
+			(flags & IOMMU_FAULT_WRITE) ? "write" : "read",
+			fault_type);
+
+	return 0;
+}
+
+static int gen8_gmu_iommu_init(struct gen8_gmu_device *gmu)
+{
+	int ret;
+
+	gmu->domain = iommu_domain_alloc(&platform_bus_type);
+	if (gmu->domain == NULL) {
+		dev_err(&gmu->pdev->dev, "Unable to allocate GMU IOMMU domain\n");
+		return -ENODEV;
+	}
+
+	/*
+	 * Disable stall on fault for the GMU context bank.
+	 * This sets SCTLR.CFCFG = 0.
+	 * Also note that, the smmu driver sets SCTLR.HUPCF = 0 by default.
+	 */
+	qcom_iommu_set_fault_model(gmu->domain, QCOM_IOMMU_FAULT_MODEL_NO_STALL);
+
+	ret = iommu_attach_device(gmu->domain, &gmu->pdev->dev);
+	if (!ret) {
+		iommu_set_fault_handler(gmu->domain,
+			gen8_gmu_iommu_fault_handler, gmu);
+		return 0;
+	}
+
+	dev_err(&gmu->pdev->dev,
+		"Unable to attach GMU IOMMU domain: %d\n", ret);
+	iommu_domain_free(gmu->domain);
+	gmu->domain = NULL;
+
+	return ret;
+}
+
 /* Default IFPC timer (300usec) value */
 #define GEN8_GMU_LONG_IFPC_HYST	FIELD_PREP(GENMASK(15, 0), 0x1680)
 
@@ -2348,12 +2456,11 @@ int gen8_gmu_probe(struct kgsl_device *device,
 	struct resource *res;
 	int ret, i;
 
-	device->gmu_core.pdev = pdev;
+	gmu->pdev = pdev;
 
-	dma_set_coherent_mask(&device->gmu_core.pdev->dev, DMA_BIT_MASK(64));
-	device->gmu_core.pdev->dev.dma_mask =
-			&device->gmu_core.pdev->dev.coherent_dma_mask;
-	set_dma_ops(GMU_PDEV_DEV(device), NULL);
+	dma_set_coherent_mask(&gmu->pdev->dev, DMA_BIT_MASK(64));
+	gmu->pdev->dev.dma_mask = &gmu->pdev->dev.coherent_dma_mask;
+	set_dma_ops(&gmu->pdev->dev, NULL);
 
 	res = platform_get_resource_byname(device->pdev, IORESOURCE_MEM,
 						"rscc");
@@ -2361,7 +2468,7 @@ int gen8_gmu_probe(struct kgsl_device *device,
 		gmu->rscc_virt = devm_ioremap(&device->pdev->dev, res->start,
 						resource_size(res));
 		if (!gmu->rscc_virt) {
-			dev_err(GMU_PDEV_DEV(device), "rscc ioremap failed\n");
+			dev_err(&gmu->pdev->dev, "rscc ioremap failed\n");
 			return -ENOMEM;
 		}
 	}
@@ -2369,8 +2476,8 @@ int gen8_gmu_probe(struct kgsl_device *device,
 	/* Setup any rdpm register ranges */
 	gen8_gmu_rdpm_probe(gmu, device);
 
-	/* Set up GMU gdscs */
-	ret = kgsl_pwrctrl_probe_gdscs(device, pdev);
+	/* Set up GMU regulators */
+	ret = kgsl_pwrctrl_probe_regulators(device, pdev);
 	if (ret)
 		return ret;
 
@@ -2379,7 +2486,7 @@ int gen8_gmu_probe(struct kgsl_device *device,
 		return ret;
 
 	/* Set up GMU IOMMU and shared memory with GMU */
-	ret = gmu_core_iommu_init(device);
+	ret = gen8_gmu_iommu_init(gmu);
 	if (ret)
 		goto error;
 
@@ -2415,7 +2522,6 @@ int gen8_gmu_probe(struct kgsl_device *device,
 	set_bit(GMU_ENABLED, &device->gmu_core.flags);
 
 	device->gmu_core.dev_ops = &gen8_gmudev;
-	device->gmu_core.gf_panic = GMU_FAULT_PANIC_NONE;
 
 	/* Set default GMU attributes */
 	gmu->log_stream_enable = false;
@@ -2435,12 +2541,12 @@ int gen8_gmu_probe(struct kgsl_device *device,
 	(void) kobject_init_and_add(&gmu->log_kobj, &log_kobj_type, &dev->kobj, "log");
 	(void) kobject_init_and_add(&gmu->stats_kobj, &stats_kobj_type, &dev->kobj, "stats");
 
-	of_property_read_u32(GMU_PDEV(device)->dev.of_node,
-		"qcom,gmu-perf-ddr-bw", &gmu->perf_ddr_bw);
+	of_property_read_u32(gmu->pdev->dev.of_node, "qcom,gmu-perf-ddr-bw",
+		&gmu->perf_ddr_bw);
 
 	spin_lock_init(&gmu->hfi.cmdq_lock);
 
-	gmu->irq = kgsl_request_irq(GMU_PDEV(device), "gmu",
+	gmu->irq = kgsl_request_irq(gmu->pdev, "gmu",
 		gen8_gmu_irq_handler, device);
 
 	if (gmu->irq >= 0)
@@ -2451,6 +2557,29 @@ int gen8_gmu_probe(struct kgsl_device *device,
 error:
 	gen8_gmu_remove(device);
 	return ret;
+}
+
+static void gen8_gmu_active_count_put(struct adreno_device *adreno_dev)
+{
+	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
+
+	if (WARN_ON(!mutex_is_locked(&device->mutex)))
+		return;
+
+	if (WARN(atomic_read(&device->active_cnt) == 0,
+		"Unbalanced get/put calls to KGSL active count\n"))
+		return;
+
+	if (atomic_dec_and_test(&device->active_cnt)) {
+		kgsl_pwrscale_update_stats(device);
+		kgsl_pwrscale_update(device);
+		kgsl_start_idle_timer(device);
+	}
+
+	trace_kgsl_active_count(device,
+		(unsigned long) __builtin_return_address(0));
+
+	wake_up(&device->active_cnt_wq);
 }
 
 int gen8_halt_gbif(struct adreno_device *adreno_dev)
@@ -2802,7 +2931,11 @@ no_gx_power:
 
 	adreno_ringbuffer_stop(adreno_dev);
 
-	adreno_llcc_slice_deactivate(adreno_dev);
+	if (!IS_ERR_OR_NULL(adreno_dev->gpu_llc_slice))
+		llcc_slice_deactivate(adreno_dev->gpu_llc_slice);
+
+	if (!IS_ERR_OR_NULL(adreno_dev->gpuhtw_llc_slice))
+		llcc_slice_deactivate(adreno_dev->gpuhtw_llc_slice);
 
 	clear_bit(GMU_PRIV_GPU_STARTED, &gmu->flags);
 
@@ -2887,7 +3020,7 @@ static int gen8_gmu_first_open(struct adreno_device *adreno_dev)
 	 * check by incrementing the active count and immediately releasing it.
 	 */
 	atomic_inc(&device->active_cnt);
-	adreno_active_count_put(adreno_dev);
+	gen8_gmu_active_count_put(adreno_dev);
 
 	return 0;
 }
@@ -3034,6 +3167,7 @@ const struct adreno_power_ops gen8_gmu_power_ops = {
 	.first_open = gen8_gmu_first_open,
 	.last_close = gen8_gmu_last_close,
 	.active_count_get = gen8_gmu_active_count_get,
+	.active_count_put = gen8_gmu_active_count_put,
 	.pm_suspend = gen8_gmu_pm_suspend,
 	.pm_resume = gen8_gmu_pm_resume,
 	.touch_wakeup = gen8_gmu_touch_wakeup,
@@ -3090,8 +3224,6 @@ int gen8_gmu_reset(struct adreno_device *adreno_dev)
 
 	gen8_reset_preempt_records(adreno_dev);
 
-	adreno_llcc_slice_deactivate(adreno_dev);
-
 	clear_bit(GMU_PRIV_GPU_STARTED, &gmu->flags);
 
 	/* Attempt to reboot the gmu and gpu */
@@ -3100,11 +3232,10 @@ int gen8_gmu_reset(struct adreno_device *adreno_dev)
 
 int gen8_gmu_hfi_probe(struct adreno_device *adreno_dev)
 {
-	struct platform_device *gmu_pdev = GMU_PDEV(KGSL_DEVICE(adreno_dev));
 	struct gen8_gmu_device *gmu = to_gen8_gmu(adreno_dev);
 	struct gen8_hfi *hfi = &gmu->hfi;
 
-	hfi->irq = kgsl_request_irq(gmu_pdev, "hfi",
+	hfi->irq = kgsl_request_irq(gmu->pdev, "hfi",
 		gen8_hfi_irq_handler, KGSL_DEVICE(adreno_dev));
 
 	return hfi->irq < 0 ? hfi->irq : 0;

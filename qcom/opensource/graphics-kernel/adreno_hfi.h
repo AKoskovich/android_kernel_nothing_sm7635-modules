@@ -77,7 +77,6 @@
 #define HFI_FEATURE_HW_FENCE	25
 #define HFI_FEATURE_PERF_NORETAIN	26
 #define HFI_FEATURE_DMS		27
-#define HFI_FEATURE_THERMAL		28
 #define HFI_FEATURE_AQE		29
 
 /* Types to be used with H2F_MSG_TABLE */
@@ -92,6 +91,9 @@ enum hfi_table_type {
 	HFI_TABLE_DCVS_DATA	= 7,
 	HFI_TABLE_MAX,
 };
+
+/* A6xx uses a different value for KPROF */
+#define HFI_FEATURE_A6XX_KPROF	14
 
 /* For Gen7 & Gen8 ACD */
 #define F_PWR_ACD_CALIBRATE	78
@@ -242,8 +244,6 @@ enum hfi_mem_kind {
 	 * between LPAC and GC
 	 */
 	HFI_MEMKIND_AQE_BUFFER,
-	/** @HFI_MEMKIND_HW_FENCE_SHADOW: Shadow memory used for caching external input fences */
-	HFI_MEMKIND_HW_FENCE_SHADOW,
 	HFI_MEMKIND_MAX,
 };
 
@@ -274,7 +274,6 @@ static const char * const hfi_memkind_strings[] = {
 	[HFI_MEMKIND_HW_FENCE] = "GMU HW FENCE",
 	[HFI_MEMKIND_PREEMPT_SCRATCH] = "GMU PREEMPTION",
 	[HFI_MEMKIND_AQE_BUFFER] = "GMU AQE BUFFER",
-	[HFI_MEMKIND_HW_FENCE_SHADOW] = "GMU HW FENCE SHADOW",
 	[HFI_MEMKIND_MAX] = "GMU UNKNOWN",
 };
 
@@ -460,7 +459,6 @@ enum hfi_msg_type {
 	H2F_MSG_TEST			= 5,
 	H2F_MSG_ACD_TBL			= 7,
 	H2F_MSG_CLX_TBL			= 8,
-	H2F_MSG_THERM_TBL		= 9,
 	H2F_MSG_START			= 10,
 	H2F_MSG_FEATURE_CTRL		= 11,
 	H2F_MSG_GET_VALUE		= 12,
@@ -540,8 +538,8 @@ struct hfi_bwtable_cmd {
 
 struct opp_gx_desc {
 	u32 vote;
-	/* This is 'acdLvl' in gmu fw which is now repurposed for various dependency votes */
-	u32 dep_vote;
+	/* This is 'acdLvl' in gmu fw which is now repurposed for cx vote */
+	u32 cx_vote;
 	u32 freq;
 } __packed;
 
@@ -593,6 +591,32 @@ struct hfi_acd_table_cmd {
 	u32 stride;
 	u32 num_levels;
 	u32 data[MAX_ACD_NUM_LEVELS * MAX_ACD_STRIDE];
+} __packed;
+
+struct hfi_clx_table_v1_cmd {
+	/** @hdr: HFI header message */
+	u32 hdr;
+	/**
+	 * @data0: bits[0:15]  Feature enable control
+	 *         bits[16:31] Revision control
+	 */
+	u32 data0;
+	/**
+	 * @data1: bits[0:15]  Migration time
+	 *         bits[16:21] Current rating
+	 *         bits[22:27] Phases for domain
+	 *         bits[28:28] Path notifications
+	 *         bits[29:31] Extra feature bits
+	 */
+	u32 data1;
+	/** @clxt: CLX time in microseconds */
+	u32 clxt;
+	/** @clxh: CLH time in microseconds */
+	u32 clxh;
+	/** @urgmode: Urgent HW throttle mode of operation */
+	u32 urgmode;
+	/** @lkgen: Enable leakage current estimate */
+	u32 lkgen;
 } __packed;
 
 #define CLX_DOMAINS_V2 2
@@ -957,29 +981,9 @@ struct hfi_submit_cmd {
 	u32 big_ib_gmu_va;
 } __packed;
 
-/* This structure is only used for hw fence feature on gen7 hwsched targets */
-struct hfi_syncobj_legacy {
-	/** @ctxt_id: dma fence context id for external fence and gmu context id for kgsl fence */
-	u64 ctxt_id;
-	/** @seq_no: Sequence number (or timestamp) of this fence */
-	u64 seq_no;
-	/** @flags: Flags for this fence */
-	u64 flags;
-} __packed;
-
 struct hfi_syncobj {
-	/**
-	 * @header: bits[0:15]: size of this packet in dwords, bits[15:23]: version,
-	 * bits[24:31] unused
-	 */
-	u32 header;
-	/** @hash_index: hash index of external input fence */
-	u32 hash_index;
-	/** @ctxt_id: dma fence context id for external fence and gmu context id for kgsl fence */
 	u64 ctxt_id;
-	/** @seq_no: Sequence number (or timestamp) of this fence */
 	u64 seq_no;
-	/** @flags: Flags for this fence */
 	u64 flags;
 } __packed;
 
@@ -990,14 +994,6 @@ struct hfi_submit_syncobj {
 	u32 timestamp;
 	u32 num_syncobj;
 } __packed;
-
-#define HFI_SYNCOBJ_LEGACY_HW_FENCE_MAX \
-	((HFI_MAX_MSG_SIZE - sizeof(struct hfi_submit_syncobj)) \
-	/ sizeof(struct hfi_syncobj_legacy))
-
-#define HFI_SYNCOBJ_HW_FENCE_MAX \
-	((HFI_MAX_MSG_SIZE - sizeof(struct hfi_submit_syncobj)) \
-	/ sizeof(struct hfi_syncobj))
 
 struct hfi_log_block {
 	u32 hdr;
@@ -1156,21 +1152,6 @@ struct payload_section {
 #define KEY_AQE0_HW_FAULT 12
 #define KEY_AQE1_OPCODE_ERROR 13
 #define KEY_AQE1_HW_FAULT 14
-#define KEY_CP_BR_SW_FAULT 15
-#define KEY_CP_BV_SW_FAULT 16
-#define KEY_CP_LPAC_SW_FAULT 17
-#define KEY_CP_AQE0_SW_FAULT 18
-#define KEY_CP_AQE0_PROTECTED_ERROR 19
-#define KEY_CP_AQE1_SW_FAULT 20
-#define KEY_CP_AQE1_PROTECTED_ERROR 21
-#define KEY_CP_DDEBR_OPCODE_ERROR 22
-#define KEY_CP_DDEBR_PROTECTED_ERROR 23
-#define KEY_CP_DDEBR_HW_FAULT 24
-#define KEY_CP_DDEBR_SW_FAULT 25
-#define KEY_CP_DDEBV_OPCODE_ERROR 26
-#define KEY_CP_DDEBV_PROTECTED_ERROR 27
-#define KEY_CP_DDEBV_HW_FAULT 28
-#define KEY_CP_DDEBV_SW_FAULT 29
 #define KEY_CP_AHB_ERROR 30
 #define KEY_TSB_WRITE_ERROR 31
 
@@ -1235,35 +1216,16 @@ struct payload_section {
 /* Fault due to software fuse violation interrupt */
 #define GMU_GPU_SW_FUSE_VIOLATION 621
 /* AQE related error codes */
-#define GMU_GPU_AQE0_OPCODE_ERROR 622
+#define GMU_GPU_AQE0_OPCODE_ERRROR 622
 #define GMU_GPU_AQE0_UCODE_ERROR 623
 #define GMU_GPU_AQE0_HW_FAULT_ERROR 624
 #define GMU_GPU_AQE0_ILLEGAL_INST_ERROR 625
-#define GMU_GPU_AQE1_OPCODE_ERROR 626
+#define GMU_GPU_AQE1_OPCODE_ERRROR 626
 #define GMU_GPU_AQE1_UCODE_ERROR 627
 #define GMU_GPU_AQE1_HW_FAULT_ERROR 628
 #define GMU_GPU_AQE1_ILLEGAL_INST_ERROR 629
 /* GMU encountered a sync object which is signaled via software but not via hardware */
 #define GMU_SYNCOBJ_TIMEOUT_ERROR 630
-#define GMU_CP_DDEBR_HW_FAULT_ERROR 631
-#define GMU_CP_DDEBR_OPCODE_ERROR 632
-#define GMU_CP_DDEBR_UCODE_ERROR 633
-#define GMU_CP_DDEBR_PROTECTED_ERROR 634
-#define GMU_CP_DDEBR_ILLEGAL_INST_ERROR 635
-#define GMU_CP_DDEBV_HW_FAULT_ERROR 636
-#define GMU_CP_DDEBV_OPCODE_ERROR 637
-#define GMU_CP_DDEBV_UCODE_ERROR 638
-#define GMU_CP_DDEBV_PROTECTED_ERROR 639
-#define GMU_CP_DDEBV_ILLEGAL_INST_ERROR 640
-#define GMU_CP_BR_SW_FAULT_ERROR 641
-#define GMU_CP_BV_SW_FAULT_ERROR 642
-#define GMU_CP_LPAC_SW_FAULT_ERROR 643
-#define GMU_CP_AQE0_SW_FAULT_ERROR 644
-#define GMU_CP_AQE1_SW_FAULT_ERROR 645
-#define GMU_CP_AQE0_PROTECTED_ERROR 646
-#define GMU_CP_AQE1_PROTECTED_ERROR 647
-#define GMU_CP_DDEBR_SW_FAULT_ERROR 648
-#define GMU_CP_DDEBV_SW_FAULT_ERROR 649
 /* Non fatal GPU error codes */
 #define GMU_CP_AHB_ERROR 650
 #define GMU_ATB_ASYNC_FIFO_OVERFLOW 651
@@ -1449,14 +1411,4 @@ static inline int hfi_get_minidump_string(u32 mem_kind, char *hfi_minidump_str,
 
 	return 0;
 }
-
-/**
- * hfi_feature_to_string - Convert an HFI feature value to its
- * string representation
- * @feature: HFI feature value to convert
- *
- * Return: Pointer to a string representing the given feature.
- * If the feature is unknown, the function returns "unknown".
- */
-const char *hfi_feature_to_string(u32 feature);
 #endif

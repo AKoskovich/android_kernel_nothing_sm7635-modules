@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2008-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #ifndef __KGSL_H
 #define __KGSL_H
@@ -20,7 +20,7 @@
 
 #define KGSL_L3_DEVICE "kgsl-l3"
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
+#if (KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE)
 #include <soc/qcom/boot_stats.h>
 #define KGSL_BOOT_MARKER(str)          place_marker("M - DRIVER " str)
 #else
@@ -204,10 +204,6 @@ struct kgsl_driver {
 	struct workqueue_struct *workqueue;
 	/* @lockless_workqueue: Pointer to a workqueue handler which doesn't hold device mutex */
 	struct workqueue_struct *lockless_workqueue;
-	/** @pool_shrinker: Pointer to a shrinker that resizes the kgsl page pools */
-	struct shrinker *pool_shrinker;
-	/** @reclaim_shrinker: Pointer to a shrinker that reclaims kgsl memory */
-	struct shrinker *reclaim_shrinker;
 };
 
 extern struct kgsl_driver kgsl_driver;
@@ -280,7 +276,7 @@ struct kgsl_memdesc {
 	uint64_t gpuaddr;
 	phys_addr_t physaddr;
 	uint64_t size;
-	atomic_t priv;
+	unsigned int priv;
 	struct sg_table *sgt;
 	const struct kgsl_memdesc_ops *ops;
 	uint64_t flags;
@@ -705,10 +701,4 @@ static inline bool kgsl_addr_range_overlap(uint64_t gpuaddr1,
  */
 void kgsl_work_period_update(struct kgsl_device *device,
 			struct gpu_work_period *period, u64 active);
-
-/**
- * kgsl_context_destroy_deferred() - Destroy context in a deferred manner
- * @kref: Pointer to context refcount
- */
-void kgsl_context_destroy_deferred(struct kref *kref);
 #endif /* __KGSL_H */

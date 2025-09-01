@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
- * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include "adreno.h"
-#include "adreno_gen8_0_0_snapshot.h"
 #include "adreno_gen8_3_0_snapshot.h"
-#include "adreno_gen8_6_0_snapshot.h"
 #include "adreno_snapshot.h"
 
 static struct kgsl_memdesc *gen8_capturescript;
@@ -19,40 +17,9 @@ static bool gen8_crashdump_timedout;
 /* Starting kernel virtual address for QDSS TMC register block */
 static void __iomem *tmc_virt;
 
-const struct gen8_snapshot_block_list gen8_0_0_snapshot_block_list = {
-	.pre_crashdumper_regs = gen8_0_0_ahb_registers,
-	.num_pre_crashdumper_regs = ARRAY_SIZE(gen8_0_0_ahb_registers),
-	.debugbus_blocks = gen8_debugbus_blocks,
-	.debugbus_blocks_len = ARRAY_SIZE(gen8_debugbus_blocks),
-	.gbif_debugbus_blocks = gen8_gbif_debugbus_blocks,
-	.gbif_debugbus_blocks_len = ARRAY_SIZE(gen8_gbif_debugbus_blocks),
-	.cx_debugbus_blocks = gen8_cx_debugbus_blocks,
-	.cx_debugbus_blocks_len = ARRAY_SIZE(gen8_cx_debugbus_blocks),
-	.external_core_regs = gen8_0_0_external_core_regs,
-	.num_external_core_regs = ARRAY_SIZE(gen8_0_0_external_core_regs),
-	.gmu_cx_unsliced_regs = gen8_0_0_gmu_registers,
-	.gmu_gx_regs = gen8_gmu_gx_registers,
-	.num_gmu_gx_regs = ARRAY_SIZE(gen8_gmu_gx_registers),
-	.rscc_regs = gen8_0_0_rscc_rsc_registers,
-	.reg_list = gen8_0_0_reg_list,
-	.cx_misc_regs = gen8_0_0_cx_misc_registers,
-	.shader_blocks = gen8_0_0_shader_blocks,
-	.num_shader_blocks = ARRAY_SIZE(gen8_0_0_shader_blocks),
-	.cp_clusters = gen8_0_0_cp_clusters,
-	.num_cp_clusters = ARRAY_SIZE(gen8_0_0_cp_clusters),
-	.clusters = gen8_0_0_mvc_clusters,
-	.num_clusters = ARRAY_SIZE(gen8_0_0_mvc_clusters),
-	.sptp_clusters = gen8_0_0_sptp_clusters,
-	.num_sptp_clusters = ARRAY_SIZE(gen8_0_0_sptp_clusters),
-	.index_registers = gen8_0_0_cp_indexed_reg_list,
-	.index_registers_len = ARRAY_SIZE(gen8_0_0_cp_indexed_reg_list),
-	.mempool_index_registers = gen8_0_0_cp_mempool_reg_list,
-	.mempool_index_registers_len = ARRAY_SIZE(gen8_0_0_cp_mempool_reg_list),
-};
-
 const struct gen8_snapshot_block_list gen8_3_0_snapshot_block_list = {
-	.pre_crashdumper_regs = gen8_0_0_ahb_registers,
-	.num_pre_crashdumper_regs = ARRAY_SIZE(gen8_0_0_ahb_registers),
+	.pre_crashdumper_regs = gen8_3_0_ahb_registers,
+	.num_pre_crashdumper_regs = ARRAY_SIZE(gen8_3_0_ahb_registers),
 	.debugbus_blocks = gen8_3_0_debugbus_blocks,
 	.debugbus_blocks_len = ARRAY_SIZE(gen8_3_0_debugbus_blocks),
 	.gbif_debugbus_blocks = gen8_gbif_debugbus_blocks,
@@ -65,8 +32,8 @@ const struct gen8_snapshot_block_list gen8_3_0_snapshot_block_list = {
 	.gmu_gx_regs = gen8_3_0_gmu_gx_regs,
 	.num_gmu_gx_regs = ARRAY_SIZE(gen8_3_0_gmu_gx_regs),
 	.rscc_regs = gen8_3_0_rscc_rsc_registers,
-	.reg_list = gen8_0_0_reg_list,
-	.cx_misc_regs = gen8_0_0_cx_misc_registers,
+	.reg_list = gen8_3_0_reg_list,
+	.cx_misc_regs = gen8_3_0_cx_misc_registers,
 	.shader_blocks = gen8_3_0_shader_blocks,
 	.num_shader_blocks = ARRAY_SIZE(gen8_3_0_shader_blocks),
 	.cp_clusters = gen8_3_0_cp_clusters,
@@ -77,39 +44,8 @@ const struct gen8_snapshot_block_list gen8_3_0_snapshot_block_list = {
 	.num_sptp_clusters = ARRAY_SIZE(gen8_3_0_sptp_clusters),
 	.index_registers = gen8_3_0_cp_indexed_reg_list,
 	.index_registers_len = ARRAY_SIZE(gen8_3_0_cp_indexed_reg_list),
-	.mempool_index_registers = gen8_0_0_cp_mempool_reg_list,
-	.mempool_index_registers_len = ARRAY_SIZE(gen8_0_0_cp_mempool_reg_list),
-};
-
-const struct gen8_snapshot_block_list gen8_6_0_snapshot_block_list = {
-	.pre_crashdumper_regs = gen8_0_0_ahb_registers,
-	.num_pre_crashdumper_regs = ARRAY_SIZE(gen8_0_0_ahb_registers),
-	.debugbus_blocks = gen8_6_0_debugbus_blocks,
-	.debugbus_blocks_len = ARRAY_SIZE(gen8_6_0_debugbus_blocks),
-	.gbif_debugbus_blocks = gen8_gbif_debugbus_blocks,
-	.gbif_debugbus_blocks_len = ARRAY_SIZE(gen8_gbif_debugbus_blocks),
-	.cx_debugbus_blocks = gen8_cx_debugbus_blocks,
-	.cx_debugbus_blocks_len = ARRAY_SIZE(gen8_cx_debugbus_blocks),
-	.external_core_regs = gen8_6_0_external_core_regs,
-	.num_external_core_regs = ARRAY_SIZE(gen8_6_0_external_core_regs),
-	.gmu_cx_unsliced_regs = gen8_6_0_gmu_registers,
-	.gmu_gx_regs = gen8_6_0_gmu_gx_registers,
-	.num_gmu_gx_regs = ARRAY_SIZE(gen8_6_0_gmu_gx_registers),
-	.rscc_regs = gen8_0_0_rscc_rsc_registers,
-	.reg_list = gen8_6_0_reg_list,
-	.cx_misc_regs = gen8_0_0_cx_misc_registers,
-	.shader_blocks = gen8_6_0_shader_blocks,
-	.num_shader_blocks = ARRAY_SIZE(gen8_0_0_shader_blocks),
-	.cp_clusters = gen8_0_0_cp_clusters,
-	.num_cp_clusters = ARRAY_SIZE(gen8_0_0_cp_clusters),
-	.clusters = gen8_6_0_mvc_clusters,
-	.num_clusters = ARRAY_SIZE(gen8_6_0_mvc_clusters),
-	.sptp_clusters = gen8_0_0_sptp_clusters,
-	.num_sptp_clusters = ARRAY_SIZE(gen8_0_0_sptp_clusters),
-	.index_registers = gen8_0_0_cp_indexed_reg_list,
-	.index_registers_len = ARRAY_SIZE(gen8_0_0_cp_indexed_reg_list),
-	.mempool_index_registers = gen8_0_0_cp_mempool_reg_list,
-	.mempool_index_registers_len = ARRAY_SIZE(gen8_0_0_cp_mempool_reg_list),
+	.mempool_index_registers = gen8_3_0_cp_mempool_reg_list,
+	.mempool_index_registers_len = ARRAY_SIZE(gen8_3_0_cp_mempool_reg_list),
 };
 
 #define GEN8_SP_READ_SEL_VAL(_sliceid, _location, _pipe, _statetype, _usptp, _sptp) \
@@ -161,7 +97,6 @@ static void CD_FINISH(u64 *ptr, u32 offset)
 static bool CD_SCRIPT_CHECK(struct kgsl_device *device)
 {
 	return (adreno_smmu_is_stalled(ADRENO_DEVICE(device)) ||
-		(kgsl_mmu_ctx_terminated_on_fault(&device->mmu)) ||
 		(!device->snapshot_crashdumper) ||
 		IS_ERR_OR_NULL(gen8_capturescript) ||
 		IS_ERR_OR_NULL(gen8_crashdump_registers) ||
@@ -247,7 +182,7 @@ size_t gen8_legacy_snapshot_registers(struct kgsl_device *device,
 	header->location_id = UINT_MAX;
 	header->sp_id = UINT_MAX;
 	header->usptp_id = UINT_MAX;
-	header->slice_id = HEADER_SLICE_ID(info->regs->slice_region, info->slice_id);
+	header->slice_id = info->slice_id;
 
 	if (info->regs->sel)
 		kgsl_regwrite(device, info->regs->sel->host_reg, info->regs->sel->val);
@@ -298,7 +233,7 @@ static size_t gen8_snapshot_registers(struct kgsl_device *device, u8 *buf,
 	header->location_id = UINT_MAX;
 	header->sp_id = UINT_MAX;
 	header->usptp_id = UINT_MAX;
-	header->slice_id = HEADER_SLICE_ID(info->regs->slice_region, info->slice_id);
+	header->slice_id = info->slice_id;
 
 	src = gen8_crashdump_registers->hostptr + info->offset;
 
@@ -336,7 +271,7 @@ static size_t gen8_legacy_snapshot_shader(struct kgsl_device *device,
 	}
 
 	header->type = block->statetype;
-	header->slice_id = HEADER_SLICE_ID(block->slice_region, info->slice_id);
+	header->slice_id = info->slice_id;
 	header->sp_index = info->sp_id;
 	header->usptp = info->usptp;
 	header->pipe_id = block->pipeid;
@@ -376,7 +311,7 @@ static size_t gen8_snapshot_shader_memory(struct kgsl_device *device,
 	}
 
 	header->type = block->statetype;
-	header->slice_id = HEADER_SLICE_ID(block->slice_region, info->slice_id);
+	header->slice_id = info->slice_id;
 	header->sp_index = info->sp_id;
 	header->usptp = info->usptp;
 	header->pipe_id = block->pipeid;
@@ -652,7 +587,7 @@ err_clk_put:
 	clk_put(clk);
 }
 
-static bool gen8_snapshot_shader(struct kgsl_device *device,
+static void gen8_snapshot_shader(struct kgsl_device *device,
 				struct kgsl_snapshot *snapshot)
 {
 	struct gen8_shader_block_info info = {0};
@@ -661,13 +596,14 @@ static bool gen8_snapshot_shader(struct kgsl_device *device,
 	struct gen8_shader_block *shader_blocks = gen8_snapshot_block_list->shader_blocks;
 	size_t num_shader_blocks = gen8_snapshot_block_list->num_shader_blocks;
 	u32 i, sp, usptp, slice;
+	size_t (*func)(struct kgsl_device *device, u8 *buf, size_t remain,
+		void *priv) = gen8_legacy_snapshot_shader;
 
 	if (CD_SCRIPT_CHECK(device)) {
 		for (i = 0; i < num_shader_blocks; i++) {
 			struct gen8_shader_block *block = &shader_blocks[i];
-			u32 slices = NUMBER_OF_SLICES(block->slice_region, ADRENO_DEVICE(device));
 
-			for (slice = 0; slice < slices; slice++) {
+			for (slice = 0; slice < block->num_slices; slice++) {
 				for (sp = 0; sp < block->num_sps; sp++) {
 					for (usptp = 0; usptp < block->num_usptps; usptp++) {
 						info.block = block;
@@ -680,25 +616,23 @@ static bool gen8_snapshot_shader(struct kgsl_device *device,
 						/* Shader working/shadow memory */
 						kgsl_snapshot_add_section(device,
 							KGSL_SNAPSHOT_SECTION_SHADER_V3,
-							snapshot, gen8_legacy_snapshot_shader,
-							&info);
+							snapshot, func, &info);
 					}
 				}
 			}
 		}
 
-		return true;
+		return;
 	}
 
 	for (i = 0; i < num_shader_blocks; i++) {
 		struct gen8_shader_block *block = &shader_blocks[i];
-		u32 slices = NUMBER_OF_SLICES(block->slice_region, ADRENO_DEVICE(device));
 
 		/* Build the crash script */
 		ptr = gen8_capturescript->hostptr;
 		offset = 0;
 
-		for (slice = 0; slice < slices; slice++) {
+		for (slice = 0; slice < block->num_slices; slice++) {
 			for (sp = 0; sp < block->num_sps; sp++) {
 				for (usptp = 0; usptp < block->num_usptps; usptp++) {
 					/* Program the aperture */
@@ -716,12 +650,13 @@ static bool gen8_snapshot_shader(struct kgsl_device *device,
 		/* Marker for end of script */
 		CD_FINISH(ptr, offset);
 
-		/* Try to run the crash dumper and bail if it times out */
-		if (!_gen8_do_crashdump(device))
-			return false;
+		/* Try to run the crash dumper */
+		func = gen8_legacy_snapshot_shader;
+		if (_gen8_do_crashdump(device))
+			func = gen8_snapshot_shader_memory;
 
 		offset = 0;
-		for (slice = 0; slice < slices; slice++) {
+		for (slice = 0; slice < block->num_slices; slice++) {
 			for (sp = 0; sp < block->num_sps; sp++) {
 				for (usptp = 0; usptp < block->num_usptps; usptp++) {
 					info.block = block;
@@ -733,13 +668,11 @@ static bool gen8_snapshot_shader(struct kgsl_device *device,
 
 					/* Shader working/shadow memory */
 					kgsl_snapshot_add_section(device,
-					KGSL_SNAPSHOT_SECTION_SHADER_V3, snapshot,
-					gen8_snapshot_shader_memory, &info);
+					KGSL_SNAPSHOT_SECTION_SHADER_V3, snapshot, func, &info);
 				}
 			}
 		}
 	}
-	return true;
 }
 
 static void gen8_rmw_aperture(struct kgsl_device *device,
@@ -759,7 +692,7 @@ static void gen8_snapshot_mempool(struct kgsl_device *device,
 
 	for (i = 0; i < mempool_index_registers_len; i++) {
 		cp_indexed_reg = &gen8_snapshot_block_list->mempool_index_registers[i];
-		slice = NUMBER_OF_SLICES(cp_indexed_reg->slice_region, ADRENO_DEVICE(device));
+		slice = NUMBER_OF_SLICES(cp_indexed_reg->slice_region);
 
 		for (j = 0; j < slice; j++) {
 
@@ -773,7 +706,7 @@ static void gen8_snapshot_mempool(struct kgsl_device *device,
 			kgsl_snapshot_indexed_registers_v2(device, snapshot,
 				cp_indexed_reg->addr, cp_indexed_reg->data,
 				0, cp_indexed_reg->size, cp_indexed_reg->pipe_id,
-				HEADER_SLICE_ID(cp_indexed_reg->slice_region, j));
+				SLICE_ID(cp_indexed_reg->slice_region, j));
 
 			/* Reset CP_CHICKEN_DBG[StabilizeMVC] once we are done */
 			gen8_rmw_aperture(device, GEN8_CP_CHICKEN_DBG_PIPE, 0x4, 0x0,
@@ -820,7 +753,7 @@ static size_t gen8_legacy_snapshot_cluster_dbgahb(struct kgsl_device *device,
 	header->location_id = info->location_id;
 	header->sp_id = info->sp_id;
 	header->usptp_id = info->usptp_id;
-	header->slice_id = HEADER_SLICE_ID(info->cluster->slice_region, info->slice_id);
+	header->slice_id = info->slice_id;
 
 	read_sel = GEN8_SP_READ_SEL_VAL(info->slice_id, info->location_id,
 			info->pipe_id, info->statetype_id, info->usptp_id, info->sp_id);
@@ -872,7 +805,7 @@ static size_t gen8_snapshot_cluster_dbgahb(struct kgsl_device *device, u8 *buf,
 	header->location_id = info->location_id;
 	header->sp_id = info->sp_id;
 	header->usptp_id = info->usptp_id;
-	header->slice_id = HEADER_SLICE_ID(info->cluster->slice_region, info->slice_id);
+	header->slice_id = info->slice_id;
 
 	src = gen8_crashdump_registers->hostptr + info->offset;
 
@@ -893,7 +826,7 @@ static size_t gen8_snapshot_cluster_dbgahb(struct kgsl_device *device, u8 *buf,
 	return (size + sizeof(*header));
 }
 
-static bool gen8_snapshot_dbgahb_regs(struct kgsl_device *device,
+static void gen8_snapshot_dbgahb_regs(struct kgsl_device *device,
 			struct kgsl_snapshot *snapshot)
 {
 	u32 i, j, sp, usptp, count, slice;
@@ -901,12 +834,14 @@ static bool gen8_snapshot_dbgahb_regs(struct kgsl_device *device,
 	struct gen8_sptp_cluster_registers_info info = {0};
 	struct gen8_sptp_cluster_registers *sptp_clusters = gen8_snapshot_block_list->sptp_clusters;
 	size_t num_sptp_clusters = gen8_snapshot_block_list->num_sptp_clusters;
+	size_t (*func)(struct kgsl_device *device, u8 *buf, size_t remain,
+		void *priv) = gen8_legacy_snapshot_cluster_dbgahb;
 
 	if (CD_SCRIPT_CHECK(device)) {
 		for (i = 0; i < num_sptp_clusters; i++) {
 			struct gen8_sptp_cluster_registers *cluster = &sptp_clusters[i];
 
-			slice = NUMBER_OF_SLICES(cluster->slice_region, ADRENO_DEVICE(device));
+			slice = NUMBER_OF_SLICES(cluster->slice_region);
 			for (sp = 0; sp < cluster->num_sps; sp++) {
 				for (usptp = 0; usptp < cluster->num_usptps; usptp++) {
 					for (j = 0; j < slice; j++) {
@@ -921,18 +856,18 @@ static bool gen8_snapshot_dbgahb_regs(struct kgsl_device *device,
 						info.context_id = cluster->context_id;
 						kgsl_snapshot_add_section(device,
 							KGSL_SNAPSHOT_SECTION_MVC_V3, snapshot,
-							gen8_legacy_snapshot_cluster_dbgahb, &info);
+							func, &info);
 					}
 				}
 			}
 		}
-		return true;
+		return;
 	}
 
 	for (i = 0; i < num_sptp_clusters; i++) {
 		struct gen8_sptp_cluster_registers *cluster = &sptp_clusters[i];
 
-		slice = NUMBER_OF_SLICES(cluster->slice_region, ADRENO_DEVICE(device));
+		slice = NUMBER_OF_SLICES(cluster->slice_region);
 
 		cluster->offset = offset;
 
@@ -972,18 +907,18 @@ static bool gen8_snapshot_dbgahb_regs(struct kgsl_device *device,
 					/* Marker for end of script */
 					CD_FINISH(ptr, offset);
 
-					/* Try to run the crash dumper and bail if it times out */
-					if (!_gen8_do_crashdump(device))
-						return false;
+					func = gen8_legacy_snapshot_cluster_dbgahb;
+					/* Try to run the crash dumper */
+					if (_gen8_do_crashdump(device))
+						func = gen8_snapshot_cluster_dbgahb;
 
 					kgsl_snapshot_add_section(device,
 						KGSL_SNAPSHOT_SECTION_MVC_V3, snapshot,
-						gen8_snapshot_cluster_dbgahb, &info);
+						func, &info);
 				}
 			}
 		}
 	}
-	return true;
 }
 
 static size_t gen8_legacy_snapshot_mvc(struct kgsl_device *device, u8 *buf,
@@ -1009,7 +944,7 @@ static size_t gen8_legacy_snapshot_mvc(struct kgsl_device *device, u8 *buf,
 	header->location_id = UINT_MAX;
 	header->sp_id = UINT_MAX;
 	header->usptp_id = UINT_MAX;
-	header->slice_id = HEADER_SLICE_ID(info->cluster->slice_region, info->slice_id);
+	header->slice_id = info->slice_id;
 
 	/*
 	 * Set the AHB control for the Host to read from the
@@ -1064,7 +999,7 @@ static size_t gen8_snapshot_mvc(struct kgsl_device *device, u8 *buf,
 	header->location_id = UINT_MAX;
 	header->sp_id = UINT_MAX;
 	header->usptp_id = UINT_MAX;
-	header->slice_id = HEADER_SLICE_ID(info->cluster->slice_region, info->slice_id);
+	header->slice_id = info->slice_id;
 
 	src = gen8_crashdump_registers->hostptr + info->offset;
 
@@ -1085,7 +1020,7 @@ static size_t gen8_snapshot_mvc(struct kgsl_device *device, u8 *buf,
 	return (size + sizeof(*header));
 }
 
-static bool gen8_snapshot_mvc_regs(struct kgsl_device *device,
+static void gen8_snapshot_mvc_regs(struct kgsl_device *device,
 				struct kgsl_snapshot *snapshot,
 				struct gen8_cluster_registers *clusters,
 				size_t num_cluster)
@@ -1094,12 +1029,14 @@ static bool gen8_snapshot_mvc_regs(struct kgsl_device *device,
 	u64 *ptr, offset = 0;
 	u32 count, slice;
 	struct gen8_cluster_registers_info info = {0};
+	size_t (*func)(struct kgsl_device *device, u8 *buf,
+				size_t remain, void *priv) = gen8_legacy_snapshot_mvc;
 
 	if (CD_SCRIPT_CHECK(device)) {
 		for (i = 0; i < num_cluster; i++) {
 			struct gen8_cluster_registers *cluster = &clusters[i];
 
-			slice = NUMBER_OF_SLICES(cluster->slice_region, ADRENO_DEVICE(device));
+			slice = NUMBER_OF_SLICES(cluster->slice_region);
 			for (j = 0; j < slice; j++) {
 				info.cluster = cluster;
 				info.pipe_id = cluster->pipe_id;
@@ -1107,17 +1044,16 @@ static bool gen8_snapshot_mvc_regs(struct kgsl_device *device,
 				info.context_id = cluster->context_id;
 				info.slice_id = SLICE_ID(cluster->slice_region, j);
 				kgsl_snapshot_add_section(device,
-					KGSL_SNAPSHOT_SECTION_MVC_V3, snapshot,
-					gen8_legacy_snapshot_mvc, &info);
+					KGSL_SNAPSHOT_SECTION_MVC_V3, snapshot, func, &info);
 			}
 		}
-		return true;
+		return;
 	}
 
 	for (i = 0; i < num_cluster; i++) {
 		struct gen8_cluster_registers *cluster = &clusters[i];
 
-		slice = NUMBER_OF_SLICES(cluster->slice_region, ADRENO_DEVICE(device));
+		slice = NUMBER_OF_SLICES(cluster->slice_region);
 		cluster->offset = offset;
 
 		for (j = 0; j < slice; j++) {
@@ -1151,15 +1087,15 @@ static bool gen8_snapshot_mvc_regs(struct kgsl_device *device,
 			/* Marker for end of script */
 			CD_FINISH(ptr, offset);
 
-			/* Try to run the crash dumper and bail if it times out */
-			if (!_gen8_do_crashdump(device))
-				return false;
+			func = gen8_legacy_snapshot_mvc;
+			/* Try to run the crash dumper */
+			if (_gen8_do_crashdump(device))
+				func = gen8_snapshot_mvc;
 
 			kgsl_snapshot_add_section(device,
-				KGSL_SNAPSHOT_SECTION_MVC_V3, snapshot, gen8_snapshot_mvc, &info);
+				KGSL_SNAPSHOT_SECTION_MVC_V3, snapshot, func, &info);
 		}
 	}
-	return true;
 }
 
 /* gen8_dbgc_debug_bus_read() - Read data from trace bus */
@@ -1479,33 +1415,109 @@ static void gen8_snapshot_debugbus(struct adreno_device *adreno_dev,
 	}
 }
 
-static bool gen8_reglist_snapshot(struct kgsl_device *device,
+/* gen8_snapshot_sqe() - Dump SQE data in snapshot */
+static size_t gen8_snapshot_sqe(struct kgsl_device *device, u8 *buf,
+		size_t remain, void *priv)
+{
+	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+	struct kgsl_snapshot_debug *header = (struct kgsl_snapshot_debug *)buf;
+	u32 *data = (u32 *)(buf + sizeof(*header));
+	struct adreno_firmware *fw = ADRENO_FW(adreno_dev, ADRENO_FW_SQE);
+
+	if (remain < DEBUG_SECTION_SZ(GEN8_SQE_FW_SNAPSHOT_DWORDS)) {
+		SNAPSHOT_ERR_NOMEM(device, "SQE VERSION DEBUG");
+		return 0;
+	}
+
+	/* Dump the SQE firmware version */
+	header->type = SNAPSHOT_DEBUG_SQE_VERSION;
+	header->size = GEN8_SQE_FW_SNAPSHOT_DWORDS;
+	memcpy(data, fw->memdesc->hostptr, (GEN8_SQE_FW_SNAPSHOT_DWORDS * sizeof(u32)));
+
+	return DEBUG_SECTION_SZ(GEN8_SQE_FW_SNAPSHOT_DWORDS);
+}
+
+/* gen8_snapshot_aqe() - Dump AQE data in snapshot */
+static size_t gen8_snapshot_aqe(struct kgsl_device *device, u8 *buf,
+		size_t remain, void *priv)
+{
+	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+	struct kgsl_snapshot_debug *header = (struct kgsl_snapshot_debug *)buf;
+	u32 *data = (u32 *)(buf + sizeof(*header));
+	struct adreno_firmware *fw = ADRENO_FW(adreno_dev, ADRENO_FW_AQE);
+
+	if (!ADRENO_FEATURE(adreno_dev, ADRENO_AQE))
+		return 0;
+
+	if (remain < DEBUG_SECTION_SZ(1)) {
+		SNAPSHOT_ERR_NOMEM(device, "AQE VERSION DEBUG");
+		return 0;
+	}
+
+	/* Dump the AQE firmware version */
+	header->type = SNAPSHOT_DEBUG_AQE_VERSION;
+	header->size = 1;
+	*data = fw->version;
+
+	return DEBUG_SECTION_SZ(1);
+}
+
+/* Snapshot the preemption related buffers */
+static size_t snapshot_preemption_record(struct kgsl_device *device,
+	u8 *buf, size_t remain, void *priv)
+{
+	struct kgsl_memdesc *memdesc = priv;
+	struct kgsl_snapshot_gpu_object_v2 *header =
+		(struct kgsl_snapshot_gpu_object_v2 *)buf;
+	u8 *ptr = buf + sizeof(*header);
+	u64 ctxt_record_size = max_t(u64, GEN8_SNAPSHOT_CTXRECORD_SIZE_IN_BYTES,
+					device->snapshot_ctxt_record_size);
+
+	if (remain < (ctxt_record_size + sizeof(*header))) {
+		SNAPSHOT_ERR_NOMEM(device, "PREEMPTION RECORD");
+		return 0;
+	}
+
+	header->size = ctxt_record_size >> 2;
+	header->gpuaddr = memdesc->gpuaddr;
+	header->ptbase =
+		kgsl_mmu_pagetable_get_ttbr0(device->mmu.defaultpagetable);
+	header->type = SNAPSHOT_GPU_OBJECT_GLOBAL;
+
+	memcpy(ptr, memdesc->hostptr, ctxt_record_size);
+
+	return ctxt_record_size + sizeof(*header);
+}
+
+static void gen8_reglist_snapshot(struct kgsl_device *device,
 					struct kgsl_snapshot *snapshot)
 {
 	u64 *ptr, offset = 0;
 	u32 i, j, r, slices;
 	struct gen8_reg_list *reg_list = gen8_snapshot_block_list->reg_list;
+	size_t (*func)(struct kgsl_device *device, u8 *buf, size_t remain,
+		void *priv) = gen8_legacy_snapshot_registers;
 	struct gen8_reg_list_info info = {0};
 
 	if (CD_SCRIPT_CHECK(device)) {
 		for (i = 0; reg_list[i].regs; i++) {
 			struct gen8_reg_list *regs = &reg_list[i];
 
-			slices = NUMBER_OF_SLICES(regs->slice_region, ADRENO_DEVICE(device));
+			slices = NUMBER_OF_SLICES(regs->slice_region);
 			for (j = 0; j < slices; j++) {
 				info.regs = regs;
 				info.slice_id = SLICE_ID(regs->slice_region, j);
 				kgsl_snapshot_add_section(device, KGSL_SNAPSHOT_SECTION_MVC_V3,
-					snapshot, gen8_legacy_snapshot_registers, &info);
+					snapshot, func, &info);
 			}
 		}
-		return true;
+		return;
 	}
 
 	for (i = 0; reg_list[i].regs; i++) {
 		struct gen8_reg_list *regs = &reg_list[i];
 
-		slices = NUMBER_OF_SLICES(regs->slice_region, ADRENO_DEVICE(device));
+		slices = NUMBER_OF_SLICES(regs->slice_region);
 		regs->offset = offset;
 
 		for (j = 0; j < slices; j++) {
@@ -1533,16 +1545,15 @@ static bool gen8_reglist_snapshot(struct kgsl_device *device,
 			/* Marker for end of script */
 			CD_FINISH(ptr, offset);
 
-			/* Try to run the crash dumper and bail if it times out */
-			if (!_gen8_do_crashdump(device))
-				return false;
+			func = gen8_legacy_snapshot_registers;
+			/* Try to run the crash dumper */
+			if (_gen8_do_crashdump(device))
+				func = gen8_snapshot_registers;
 
 			kgsl_snapshot_add_section(device, KGSL_SNAPSHOT_SECTION_MVC_V3,
-				snapshot, gen8_snapshot_registers, &info);
+				snapshot, func, &info);
 		}
 	}
-
-	return true;
 }
 
 static size_t gen8_snapshot_cx_misc_registers(struct kgsl_device *device, u8 *buf,
@@ -1577,7 +1588,7 @@ static size_t gen8_snapshot_cx_misc_registers(struct kgsl_device *device, u8 *bu
 	return size;
 }
 
-static bool gen8_cx_misc_regs_snapshot(struct kgsl_device *device,
+static void gen8_cx_misc_regs_snapshot(struct kgsl_device *device,
 					struct kgsl_snapshot *snapshot)
 {
 	u64 *ptr, offset = 0;
@@ -1601,27 +1612,18 @@ static bool gen8_cx_misc_regs_snapshot(struct kgsl_device *device,
 	/* Marker for end of script */
 	CD_FINISH(ptr, offset);
 
-	/* Try to run the crash dumper if it fails return */
+	/* Try to run the crash dumper */
 	if (_gen8_do_crashdump(device)) {
 		kgsl_snapshot_add_section(device, KGSL_SNAPSHOT_SECTION_REGS_V2,
 			snapshot, gen8_snapshot_cx_misc_registers,
 			(void *)gen8_snapshot_block_list->cx_misc_regs);
-		return true;
-	} else
-		return false;
-
-legacy_snapshot:
-	regs_ptr = (const u32 *)gen8_snapshot_block_list->cx_misc_regs;
-
-	if (!kgsl_regmap_valid_offset(&device->regmap, regs_ptr[0])) {
-		WARN_ONCE(1, "cx_misc registers are not defined in device tree");
-		return true;
+		return;
 	}
 
+legacy_snapshot:
 	kgsl_snapshot_add_section(device, KGSL_SNAPSHOT_SECTION_REGS_V2,
-		snapshot, adreno_snapshot_registers_v2, (void *)regs_ptr);
-
-	return true;
+		snapshot, adreno_snapshot_cx_misc_registers,
+		(void *)gen8_snapshot_block_list->cx_misc_regs);
 }
 
 void gen8_snapshot_external_core_regs(struct kgsl_device *device,
@@ -1653,29 +1655,33 @@ void gen8_snapshot(struct adreno_device *adreno_dev,
 		struct kgsl_snapshot *snapshot)
 {
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
-	u32 i, slice_mask;
+	struct adreno_ringbuffer *rb;
+	u32 i;
 	const struct adreno_gen8_core *gpucore = to_gen8_core(ADRENO_DEVICE(device));
 	int is_current_rt;
+
 	gen8_crashdump_timedout = false;
 	gen8_snapshot_block_list = gpucore->gen8_snapshot_block_list;
 
-	/* External core and CX MISC regs are dumped in the beginning of gmu snapshot */
-	if (!gmu_core_isenabled(device)) {
+	/* External registers are dumped in the beginning of gmu snapshot */
+	if (!gmu_core_isenabled(device))
 		gen8_snapshot_external_core_regs(device, snapshot);
 
-		/*
-		 * If crashdumper timed out while dumping this section skip everything
-		 * since even AHB accesses to the GPU might cause NoC errors.
-		 */
-		if (!gen8_cx_misc_regs_snapshot(device, snapshot))
-			return;
-	}
+	gen8_cx_misc_regs_snapshot(device, snapshot);
 
 	gen8_snapshot_cx_debugbus(adreno_dev, snapshot);
 
 	if (!gen8_gmu_rpmh_pwr_state_is_active(device) ||
 		!gen8_gmu_gx_is_on(adreno_dev))
 		return;
+
+	/* SQE Firmware */
+	kgsl_snapshot_add_section(device, KGSL_SNAPSHOT_SECTION_DEBUG,
+		snapshot, gen8_snapshot_sqe, NULL);
+
+	/* AQE Firmware */
+	kgsl_snapshot_add_section(device, KGSL_SNAPSHOT_SECTION_DEBUG,
+		snapshot, gen8_snapshot_aqe, NULL);
 
 	gen8_snapshot_trace_buffer(device, snapshot);
 
@@ -1718,14 +1724,8 @@ void gen8_snapshot(struct adreno_device *adreno_dev,
 	/* Clear aperture register */
 	gen8_host_aperture_set(adreno_dev, 0, 0, 0);
 
-	/*
-	 * Assert the isStatic bit before triggering snapshot.
-	 * BIT(0): GPU activity during snapshot dump
-	 * BIT(1): GPU UNSLICE activity during snapshot dump
-	 * Similarly, BIT(4) for slice-0, BIT(5) for slice-1 and so on.
-	 */
-	slice_mask = ((1 << gen8_get_num_slices(adreno_dev)) - 1) << 4;
-	kgsl_regwrite(device, GEN8_RBBM_SNAPSHOT_STATUS, BIT(0) | BIT(1) | slice_mask);
+	/* Assert the isStatic bit before triggering snapshot */
+	kgsl_regwrite(device, GEN8_RBBM_SNAPSHOT_STATUS, 0x1);
 
 	/* Dump the registers which get affected by crash dumper trigger */
 	for (i = 0; i < gen8_snapshot_block_list->num_pre_crashdumper_regs; i++) {
@@ -1733,7 +1733,7 @@ void gen8_snapshot(struct adreno_device *adreno_dev,
 		struct gen8_reg_list_info info = {0};
 		u32 j, slices;
 
-		slices = NUMBER_OF_SLICES(regs->slice_region, adreno_dev);
+		slices = NUMBER_OF_SLICES(regs->slice_region);
 
 		for (j = 0; j < slices; j++) {
 			info.regs = regs;
@@ -1743,12 +1743,7 @@ void gen8_snapshot(struct adreno_device *adreno_dev,
 		}
 	}
 
-	/*
-	 * If crashdumper timed out while dumping this section skip everything
-	 * since even AHB acceses to the GPU might cause NoC errors.
-	 */
-	if (!gen8_reglist_snapshot(device, snapshot))
-		goto err;
+	gen8_reglist_snapshot(device, snapshot);
 
 	for (i = 0; i < gen8_snapshot_block_list->index_registers_len; i++) {
 		kgsl_regwrite(device, GEN8_CP_APERTURE_CNTL_HOST, GEN8_CP_APERTURE_REG_VAL
@@ -1764,34 +1759,31 @@ void gen8_snapshot(struct adreno_device *adreno_dev,
 	/* Mempool debug data */
 	gen8_snapshot_mempool(device, snapshot);
 
-	/*
-	 * CP MVC register section
-	 * If crashdumper timed out while dumping any section below skip everything
-	 * since even AHB acceses to the GPU might cause NoC errors.
-	 */
-	if (!gen8_snapshot_mvc_regs(device, snapshot,
-		gen8_snapshot_block_list->cp_clusters, gen8_snapshot_block_list->num_cp_clusters))
-		goto err;
+	/* CP MVC register section */
+	gen8_snapshot_mvc_regs(device, snapshot,
+		gen8_snapshot_block_list->cp_clusters, gen8_snapshot_block_list->num_cp_clusters);
 
 	/* MVC register section */
-	if (!gen8_snapshot_mvc_regs(device, snapshot,
-		gen8_snapshot_block_list->clusters, gen8_snapshot_block_list->num_clusters))
-		goto err;
+	gen8_snapshot_mvc_regs(device, snapshot,
+		gen8_snapshot_block_list->clusters, gen8_snapshot_block_list->num_clusters);
 
 	/* registers dumped through DBG AHB */
-	if (!gen8_snapshot_dbgahb_regs(device, snapshot))
-		goto err;
+	gen8_snapshot_dbgahb_regs(device, snapshot);
 
 	/* Shader memory */
-	if (!gen8_snapshot_shader(device, snapshot))
-		goto err;
+	gen8_snapshot_shader(device, snapshot);
 
 	kgsl_regwrite(device, GEN8_RBBM_SNAPSHOT_STATUS, 0x0);
 
-err:
 	/* Preemption record */
-	adreno_snapshot_preemption_record(device, snapshot);
-
+	if (adreno_is_preemption_enabled(adreno_dev)) {
+		FOR_EACH_RINGBUFFER(adreno_dev, rb, i) {
+			kgsl_snapshot_add_section(device,
+				KGSL_SNAPSHOT_SECTION_GPU_OBJECT_V2,
+				snapshot, snapshot_preemption_record,
+				rb->preemption_desc);
+		}
+	}
 	if (is_current_rt)
 		sched_set_fifo(current);
 }

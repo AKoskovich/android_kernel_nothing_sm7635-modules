@@ -1,22 +1,19 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
+
+#include <linux/dma-fence-array.h>
+#include <soc/qcom/msm_performance.h>
 
 #include "adreno.h"
 #include "adreno_hfi.h"
 #include "adreno_snapshot.h"
 #include "adreno_sysfs.h"
 #include "adreno_trace.h"
-#include "kgsl_eventlog.h"
 #include "kgsl_timeline.h"
-#include "kgsl_trace.h"
 #include <linux/msm_kgsl.h>
-#include <linux/sched/clock.h>
-#include <soc/qcom/msm_performance.h>
-
-#define POLL_SLEEP_US 100
 
 /*
  * Number of commands that can be queued in a context before it sleeps
@@ -379,6 +376,13 @@ static int hwsched_queue_context(struct adreno_device *adreno_dev,
 	return 0;
 }
 
+void adreno_hwsched_flush(struct adreno_device *adreno_dev)
+{
+	struct adreno_hwsched *hwsched = &adreno_dev->hwsched;
+
+	kthread_flush_worker(hwsched->worker);
+}
+
 /**
  * is_marker_skip() - Check if the draw object is a MARKEROBJ_TYPE and CMDOBJ_SKIP bit is set
  */
@@ -399,10 +403,12 @@ static bool is_marker_skip(struct kgsl_drawobj *drawobj)
 
 static bool _abort_submission(struct adreno_device *adreno_dev)
 {
+	struct adreno_hwsched *hwsched = &adreno_dev->hwsched;
+
 	/* We only need a single barrier before reading all the atomic variables below */
 	smp_rmb();
 
-	if (atomic_read(&adreno_dev->halt) || atomic_read(&adreno_dev->scheduler_fault))
+	if (atomic_read(&adreno_dev->halt) || atomic_read(&hwsched->fault))
 		return true;
 
 	return false;
@@ -423,8 +429,6 @@ static int hwsched_sendcmd(struct adreno_device *adreno_dev,
 	struct kgsl_context *context = drawobj->context;
 	int ret;
 	struct cmd_list_obj *obj;
-	int is_current_rt = rt_task(current);
-	int nice = task_nice(current);
 
 	obj = kmem_cache_alloc(obj_cache, GFP_KERNEL);
 	if (!obj)
@@ -432,18 +436,17 @@ static int hwsched_sendcmd(struct adreno_device *adreno_dev,
 
 	mutex_lock(&device->mutex);
 
-	/* Elevating thread’s priority to avoid context switch with holding device mutex */
-	if (!is_current_rt)
-		sched_set_fifo(current);
-
 	if (_abort_submission(adreno_dev)) {
-		ret = -EBUSY;
-		goto done;
+		mutex_unlock(&device->mutex);
+		kmem_cache_free(obj_cache, obj);
+		return -EBUSY;
 	}
 
+
 	if (kgsl_context_detached(context)) {
-		ret = -ENOENT;
-		goto done;
+		mutex_unlock(&device->mutex);
+		kmem_cache_free(obj_cache, obj);
+		return -ENOENT;
 	}
 
 	hwsched->inflight++;
@@ -453,7 +456,9 @@ static int hwsched_sendcmd(struct adreno_device *adreno_dev,
 		ret = adreno_active_count_get(adreno_dev);
 		if (ret) {
 			hwsched->inflight--;
-			goto done;
+			mutex_unlock(&device->mutex);
+			kmem_cache_free(obj_cache, obj);
+			return ret;
 		}
 		set_bit(ADRENO_HWSCHED_POWER, &hwsched->flags);
 	}
@@ -470,7 +475,9 @@ static int hwsched_sendcmd(struct adreno_device *adreno_dev,
 		}
 
 		hwsched->inflight--;
-		goto done;
+		kmem_cache_free(obj_cache, obj);
+		mutex_unlock(&device->mutex);
+		return ret;
 	}
 
 	if ((hwsched->inflight == 1) &&
@@ -497,13 +504,9 @@ static int hwsched_sendcmd(struct adreno_device *adreno_dev,
 	list_add_tail(&obj->node, &hwsched->cmd_list);
 
 done:
-	if (!is_current_rt)
-		sched_set_normal(current, nice);
 	mutex_unlock(&device->mutex);
-	if (ret)
-		kmem_cache_free(obj_cache, obj);
 
-	return ret;
+	return 0;
 }
 
 /**
@@ -690,11 +693,25 @@ static void hwsched_issuecmds(struct adreno_device *adreno_dev)
 		hwsched_handle_jobs(adreno_dev, i);
 }
 
+void adreno_hwsched_trigger(struct adreno_device *adreno_dev)
+{
+	struct adreno_hwsched *hwsched = &adreno_dev->hwsched;
+
+	kthread_queue_work(hwsched->worker, &hwsched->work);
+}
+
 static inline void _decrement_submit_now(struct kgsl_device *device)
 {
 	spin_lock(&device->submit_lock);
 	device->submit_now--;
 	spin_unlock(&device->submit_lock);
+}
+
+u32 adreno_hwsched_gpu_fault(struct adreno_device *adreno_dev)
+{
+	/* make sure we're reading the latest value */
+	smp_rmb();
+	return atomic_read(&adreno_dev->hwsched.fault);
 }
 
 /**
@@ -723,7 +740,7 @@ static void adreno_hwsched_issuecmds(struct adreno_device *adreno_dev)
 		goto done;
 	}
 
-	if (!adreno_gpu_fault(adreno_dev))
+	if (!adreno_hwsched_gpu_fault(adreno_dev))
 		hwsched_issuecmds(adreno_dev);
 
 	if (hwsched->inflight > 0) {
@@ -738,7 +755,7 @@ static void adreno_hwsched_issuecmds(struct adreno_device *adreno_dev)
 	return;
 
 done:
-	adreno_scheduler_queue(adreno_dev);
+	adreno_hwsched_trigger(adreno_dev);
 }
 
 /**
@@ -1093,9 +1110,6 @@ static int adreno_hwsched_queue_cmds(struct kgsl_device_private *dev_priv,
 	} else
 		kmem_cache_free(jobs_cache, job);
 
-	if (test_and_clear_bit(ADRENO_CONTEXT_FAULT, &context->priv))
-		return -EPROTO;
-
 	return 0;
 }
 
@@ -1139,16 +1153,6 @@ void adreno_hwsched_retire_cmdobj(struct adreno_hwsched *hwsched,
 	kgsl_drawobj_destroy(drawobj);
 }
 
-void adreno_hwsched_syncobj_kfence_put(struct kgsl_drawobj_sync *syncobj)
-{
-	int i;
-
-	for (i = 0; i < syncobj->num_hw_fence; i++) {
-		kgsl_context_put(syncobj->hw_fences[i].context);
-		syncobj->hw_fences[i].context = NULL;
-	}
-}
-
 static bool drawobj_retired(struct adreno_device *adreno_dev,
 	struct kgsl_drawobj *drawobj)
 {
@@ -1164,7 +1168,7 @@ static bool drawobj_retired(struct adreno_device *adreno_dev,
 		if (timestamp_cmp(drawobj->timestamp, hdr->sync_obj_ts) > 0)
 			return false;
 
-		adreno_hwsched_syncobj_kfence_put(SYNCOBJ(drawobj));
+		trace_adreno_syncobj_retired(drawobj->context->id, drawobj->timestamp);
 		kgsl_drawobj_destroy(drawobj);
 		return true;
 	}
@@ -1221,7 +1225,7 @@ static void adreno_hwsched_queue_context(struct adreno_device *adreno_dev,
 	struct adreno_context *drawctxt)
 {
 	hwsched_queue_context(adreno_dev, drawctxt);
-	adreno_scheduler_queue(adreno_dev);
+	adreno_hwsched_trigger(adreno_dev);
 }
 
 void adreno_hwsched_start(struct adreno_device *adreno_dev)
@@ -1230,7 +1234,7 @@ void adreno_hwsched_start(struct adreno_device *adreno_dev)
 
 	complete_all(&device->halt_gate);
 
-	adreno_scheduler_queue(adreno_dev);
+	adreno_hwsched_trigger(adreno_dev);
 }
 
 static void change_preemption(struct adreno_device *adreno_dev, void *priv)
@@ -1293,16 +1297,17 @@ static const struct attribute *_hwsched_attr_list[] = {
 void adreno_hwsched_deregister_hw_fence(struct adreno_device *adreno_dev)
 {
 	struct adreno_hwsched *hwsched = &adreno_dev->hwsched;
+	struct adreno_hw_fence *hw_fence = &hwsched->hw_fence;
 
 	if (!test_bit(ADRENO_HWSCHED_HW_FENCE, &hwsched->flags))
 		return;
 
-	kgsl_hw_fence_close(KGSL_DEVICE(adreno_dev));
+	msm_hw_fence_deregister(hwsched->hw_fence.handle);
 
-	if (hwsched->hw_fence_md.sgt)
-		sg_free_table(hwsched->hw_fence_md.sgt);
+	if (hw_fence->memdesc.sgt)
+		sg_free_table(hw_fence->memdesc.sgt);
 
-	memset(&hwsched->hw_fence_md, 0x0, sizeof(hwsched->hw_fence_md));
+	memset(&hw_fence->memdesc, 0x0, sizeof(hw_fence->memdesc));
 
 	kmem_cache_destroy(hwsched->hw_fence_cache);
 
@@ -1314,8 +1319,8 @@ static void adreno_hwsched_dispatcher_close(struct adreno_device *adreno_dev)
 	struct adreno_hwsched *hwsched = &adreno_dev->hwsched;
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 
-	if (!IS_ERR_OR_NULL(adreno_dev->scheduler_worker))
-		kthread_destroy_worker(adreno_dev->scheduler_worker);
+	if (!IS_ERR_OR_NULL(hwsched->worker))
+		kthread_destroy_worker(hwsched->worker);
 
 	adreno_set_dispatch_ops(adreno_dev, NULL);
 
@@ -1357,7 +1362,7 @@ static bool drawobj_replay(struct adreno_device *adreno_dev,
 		if (kgsl_drawobj_events_pending(SYNCOBJ(drawobj)))
 			return true;
 
-		adreno_hwsched_syncobj_kfence_put(SYNCOBJ(drawobj));
+		trace_adreno_syncobj_retired(drawobj->context->id, drawobj->timestamp);
 		kgsl_drawobj_destroy(drawobj);
 		return false;
 	}
@@ -1636,22 +1641,39 @@ static bool context_is_throttled(struct kgsl_device *device,
 
 static void _print_syncobj(struct adreno_device *adreno_dev, struct kgsl_drawobj *drawobj)
 {
-	int i;
+	int i, j, fence_index = 0;
 	struct kgsl_drawobj_sync *syncobj = SYNCOBJ(drawobj);
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 
-	for (i = 0; i < syncobj->num_hw_fence; i++) {
-		struct dma_fence *fence = syncobj->hw_fences[i].fence;
-		bool kgsl = is_kgsl_fence(fence);
-		bool signaled = test_bit(DMA_FENCE_FLAG_SIGNALED_BIT, &fence->flags);
-		char value[32] = "unknown";
+	for (i = 0; i < syncobj->numsyncs; i++) {
+		struct kgsl_drawobj_sync_event *event = &syncobj->synclist[i];
+		struct kgsl_sync_fence_cb *kcb = event->handle;
+		struct dma_fence **fences;
+		struct dma_fence_array *array;
+		u32 num_fences;
 
-		if (fence->ops->timeline_value_str)
-			fence->ops->timeline_value_str(fence, value, sizeof(value));
+		array = to_dma_fence_array(kcb->fence);
+		if (array != NULL) {
+			num_fences = array->num_fences;
+			fences = array->fences;
+		} else {
+			num_fences = 1;
+			fences = &kcb->fence;
+		}
 
-		dev_err(device->dev,
-			"dma fence[%d] signaled:%d kgsl:%d ctx:%llu seqno:%llu value:%s\n",
-			i, signaled, kgsl, fence->context, fence->seqno, value);
+		for (j = 0; j < num_fences; j++, fence_index++) {
+			bool kgsl = is_kgsl_fence(fences[j]);
+			bool signaled = test_bit(DMA_FENCE_FLAG_SIGNALED_BIT, &fences[j]->flags);
+			char value[32] = "unknown";
+
+			if (fences[j]->ops->timeline_value_str)
+				fences[j]->ops->timeline_value_str(fences[j], value, sizeof(value));
+
+			dev_err(device->dev,
+				"dma fence[%d] signaled:%d kgsl:%d ctx:%llu seqno:%llu value:%s\n",
+				fence_index, signaled, kgsl, fences[j]->context, fences[j]->seqno,
+				value);
+		}
 	}
 
 }
@@ -1691,7 +1713,7 @@ static void adreno_hwsched_reset_and_snapshot_legacy(struct adreno_device *adren
 
 	if (cmd->error == GMU_SYNCOBJ_TIMEOUT_ERROR) {
 		print_fault_syncobj(adreno_dev, cmd->ctxt_id, cmd->ts);
-		gmu_core_fault_snapshot(device, GMU_FAULT_PANIC_NONE);
+		gmu_core_fault_snapshot(device);
 		goto done;
 	}
 
@@ -1703,7 +1725,7 @@ static void adreno_hwsched_reset_and_snapshot_legacy(struct adreno_device *adren
 	 * faulted.
 	 */
 	obj = get_fault_cmdobj(adreno_dev, cmd->ctxt_id, cmd->ts);
-	if (!obj && (fault & ADRENO_IOMMU_STALL_ON_PAGE_FAULT))
+	if (!obj && (fault & ADRENO_IOMMU_PAGE_FAULT))
 		obj = get_active_cmdobj(adreno_dev);
 
 	if (obj) {
@@ -1717,14 +1739,9 @@ static void adreno_hwsched_reset_and_snapshot_legacy(struct adreno_device *adren
 			drawobj = NULL;
 	}
 
-	if (drawobj && drawobj->context)
-		set_bit(ADRENO_CONTEXT_FAULT, &drawobj->context->priv);
-
-	adreno_gpufault_stats(adreno_dev, drawobj, NULL, fault);
-
 	if (!drawobj) {
 		if (fault & ADRENO_GMU_FAULT)
-			gmu_core_fault_snapshot(device, GMU_FAULT_PANIC_NONE);
+			gmu_core_fault_snapshot(device);
 		else
 			kgsl_device_snapshot(device, NULL, NULL, false);
 		goto done;
@@ -1777,7 +1794,7 @@ static void adreno_hwsched_reset_and_snapshot(struct adreno_device *adreno_dev, 
 
 	if (cmd->error == GMU_SYNCOBJ_TIMEOUT_ERROR) {
 		print_fault_syncobj(adreno_dev, cmd->gc.ctxt_id, cmd->gc.ts);
-		gmu_core_fault_snapshot(device, GMU_FAULT_PANIC_NONE);
+		gmu_core_fault_snapshot(device);
 		goto done;
 	}
 
@@ -1791,7 +1808,7 @@ static void adreno_hwsched_reset_and_snapshot(struct adreno_device *adreno_dev, 
 	obj = get_fault_cmdobj(adreno_dev, cmd->gc.ctxt_id, cmd->gc.ts);
 	obj_lpac = get_fault_cmdobj(adreno_dev, cmd->lpac.ctxt_id, cmd->lpac.ts);
 
-	if (!obj && (fault & ADRENO_IOMMU_STALL_ON_PAGE_FAULT))
+	if (!obj && (fault & ADRENO_IOMMU_PAGE_FAULT))
 		obj = get_active_cmdobj(adreno_dev);
 
 	if (obj) {
@@ -1805,21 +1822,16 @@ static void adreno_hwsched_reset_and_snapshot(struct adreno_device *adreno_dev, 
 			drawobj = NULL;
 	}
 
-	if (drawobj && drawobj->context)
-		set_bit(ADRENO_CONTEXT_FAULT, &drawobj->context->priv);
-
 	do_fault_header(adreno_dev, drawobj, fault);
 
-	if (!obj_lpac && (fault & ADRENO_IOMMU_STALL_ON_PAGE_FAULT))
+	if (!obj_lpac && (fault & ADRENO_IOMMU_PAGE_FAULT))
 		obj_lpac = get_active_cmdobj_lpac(adreno_dev);
 
 	if (!obj && !obj_lpac) {
 		if (fault & ADRENO_GMU_FAULT)
-			gmu_core_fault_snapshot(device, GMU_FAULT_PANIC_NONE);
+			gmu_core_fault_snapshot(device);
 		else
 			kgsl_device_snapshot(device, NULL, NULL, false);
-
-		adreno_gpufault_stats(adreno_dev, NULL, NULL, fault);
 		goto done;
 	}
 
@@ -1834,11 +1846,7 @@ static void adreno_hwsched_reset_and_snapshot(struct adreno_device *adreno_dev, 
 			gpudev->lpac_fault_header(adreno_dev, drawobj_lpac);
 	}
 
-	if (drawobj_lpac && drawobj_lpac->context)
-		set_bit(ADRENO_CONTEXT_FAULT, &drawobj_lpac->context->priv);
-
 	kgsl_device_snapshot(device, context, context_lpac, false);
-	adreno_gpufault_stats(adreno_dev, drawobj, drawobj_lpac, fault);
 
 	if (drawobj) {
 		force_retire_timestamp(device, drawobj);
@@ -1880,28 +1888,9 @@ static bool adreno_hwsched_do_fault(struct adreno_device *adreno_dev)
 	struct adreno_hwsched *hwsched = &adreno_dev->hwsched;
 	int fault;
 
-	fault = adreno_gpu_fault(adreno_dev);
+	fault = atomic_xchg(&hwsched->fault, 0);
 	if (fault == 0)
 		return false;
-
-	/*
-	 * Return early if there is a concurrent suspend in progress. The suspend thread will error
-	 * out in the presence of this hwsched fault and requeue the dispatcher to handle this fault
-	 */
-	if (!mutex_trylock(&adreno_dev->fault_recovery_mutex))
-		return true;
-
-	/*
-	 * Wait long enough to allow the system to come out of suspend completely, which can take
-	 * variable amount of time especially if it has to rewind suspend processes and devices.
-	 */
-	if (!wait_for_completion_timeout(&adreno_dev->suspend_recovery_gate,
-			msecs_to_jiffies(ADRENO_SUSPEND_RECOVERY_GATE_TIMEOUT_MS))) {
-		dev_err(device->dev, "suspend recovery gate timeout\n");
-		adreno_scheduler_queue(adreno_dev);
-		mutex_unlock(&adreno_dev->fault_recovery_mutex);
-		return true;
-	}
 
 	mutex_lock(&device->mutex);
 
@@ -1910,19 +1899,19 @@ static bool adreno_hwsched_do_fault(struct adreno_device *adreno_dev)
 	else
 		adreno_hwsched_reset_and_snapshot(adreno_dev, fault);
 
-	adreno_scheduler_queue(adreno_dev);
+	adreno_hwsched_trigger(adreno_dev);
 
 	mutex_unlock(&device->mutex);
-	mutex_unlock(&adreno_dev->fault_recovery_mutex);
 
 	return true;
 }
 
 static void adreno_hwsched_work(struct kthread_work *work)
 {
-	struct adreno_device *adreno_dev = container_of(work,
-			struct adreno_device, scheduler_work);
-	struct adreno_hwsched *hwsched = &adreno_dev->hwsched;
+	struct adreno_hwsched *hwsched = container_of(work,
+			struct adreno_hwsched, work);
+	struct adreno_device *adreno_dev = container_of(hwsched,
+			struct adreno_device, hwsched);
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 
 	mutex_lock(&hwsched->mutex);
@@ -1956,6 +1945,49 @@ static void adreno_hwsched_work(struct kthread_work *work)
 	mutex_unlock(&hwsched->mutex);
 }
 
+void adreno_hwsched_fault(struct adreno_device *adreno_dev,
+		u32 fault)
+{
+	struct adreno_hwsched *hwsched = &adreno_dev->hwsched;
+	u32 curr = atomic_read(&hwsched->fault);
+
+	atomic_set(&hwsched->fault, curr | fault);
+
+	/* make sure fault is written before triggering dispatcher */
+	smp_wmb();
+
+	adreno_hwsched_trigger(adreno_dev);
+}
+
+void adreno_hwsched_clear_fault(struct adreno_device *adreno_dev)
+{
+	atomic_set(&adreno_dev->hwsched.fault, 0);
+
+	/* make sure other CPUs see the update */
+	smp_wmb();
+}
+
+static bool is_tx_slot_available(struct adreno_device *adreno_dev)
+{
+	struct adreno_hwsched *hwsched = &adreno_dev->hwsched;
+	void *ptr = hwsched->hw_fence.mem_descriptor.virtual_addr;
+	struct msm_hw_fence_hfi_queue_header *hdr = (struct msm_hw_fence_hfi_queue_header *)
+		(ptr + sizeof(struct msm_hw_fence_hfi_queue_table_header));
+	u32 queue_size_dwords = hdr->queue_size / sizeof(u32);
+	u32 payload_size_dwords = hdr->pkt_size / sizeof(u32);
+	u32 free_dwords, write_idx = hdr->write_index, read_idx = hdr->read_index;
+	u32 reserved_dwords = atomic_read(&hwsched->hw_fence_count) * payload_size_dwords;
+
+	free_dwords = read_idx <= write_idx ?
+		queue_size_dwords - (write_idx - read_idx) :
+		read_idx - write_idx;
+
+	if (free_dwords - reserved_dwords <= payload_size_dwords)
+		return false;
+
+	return true;
+}
+
 static void adreno_hwsched_create_hw_fence(struct adreno_device *adreno_dev,
 	struct kgsl_sync_fence *kfence)
 {
@@ -1971,8 +2003,7 @@ static void adreno_hwsched_create_hw_fence(struct adreno_device *adreno_dev,
 	if (kgsl_context_is_bad(context))
 		return;
 
-	if (!kgsl_hw_fence_tx_slot_available(KGSL_DEVICE(adreno_dev),
-		&adreno_dev->hwsched.hw_fence_count))
+	if (!is_tx_slot_available(adreno_dev))
 		return;
 
 	hwsched_ops->create_hw_fence(adreno_dev, kfence);
@@ -1982,7 +2013,9 @@ static const struct adreno_dispatch_ops hwsched_ops = {
 	.close = adreno_hwsched_dispatcher_close,
 	.queue_cmds = adreno_hwsched_queue_cmds,
 	.queue_context = adreno_hwsched_queue_context,
+	.fault = adreno_hwsched_fault,
 	.create_hw_fence = adreno_hwsched_create_hw_fence,
+	.get_fault = adreno_hwsched_gpu_fault,
 };
 
 static void hwsched_lsr_check(struct work_struct *work)
@@ -2022,15 +2055,15 @@ int adreno_hwsched_init(struct adreno_device *adreno_dev,
 	if (!hwsched->ctxt_bad)
 		return -ENOMEM;
 
-	adreno_dev->scheduler_worker = kthread_create_worker(0, "kgsl_hwsched");
-	if (IS_ERR(adreno_dev->scheduler_worker)) {
+	hwsched->worker = kthread_create_worker(0, "kgsl_hwsched");
+	if (IS_ERR(hwsched->worker)) {
 		kfree(hwsched->ctxt_bad);
-		return PTR_ERR(adreno_dev->scheduler_worker);
+		return PTR_ERR(hwsched->worker);
 	}
 
 	mutex_init(&hwsched->mutex);
 
-	kthread_init_work(&adreno_dev->scheduler_work, adreno_hwsched_work);
+	kthread_init_work(&hwsched->work, adreno_hwsched_work);
 
 	jobs_cache = KMEM_CACHE(adreno_dispatch_job, 0);
 	obj_cache = KMEM_CACHE(cmd_list_obj, 0);
@@ -2042,7 +2075,7 @@ int adreno_hwsched_init(struct adreno_device *adreno_dev,
 		init_llist_head(&hwsched->requeue[i]);
 	}
 
-	sched_set_fifo(adreno_dev->scheduler_worker->task);
+	sched_set_fifo(hwsched->worker->task);
 
 	WARN_ON(sysfs_create_files(&device->dev->kobj, _hwsched_attr_list));
 	adreno_set_dispatch_ops(adreno_dev, &hwsched_ops);
@@ -2156,27 +2189,6 @@ void adreno_hwsched_unregister_contexts(struct adreno_device *adreno_dev)
 	hwsched->global_ctxt_gmu_registered = false;
 }
 
-int adreno_gmu_context_queue_read(struct adreno_context *drawctxt, u32 *output,
-	u32 read_idx, u32 size_dwords)
-{
-	struct gmu_context_queue_header *hdr = drawctxt->gmu_context_queue.hostptr;
-	u32 *queue = drawctxt->gmu_context_queue.hostptr + sizeof(*hdr);
-	u32 i;
-
-	if ((size_dwords > hdr->queue_size) || (read_idx >= hdr->queue_size))
-		return -EINVAL;
-
-	/* Clear the output data before populating */
-	memset(output, 0, size_dwords << 2);
-
-	for (i = 0; i < size_dwords; i++) {
-		output[i] = queue[read_idx];
-		read_idx = (read_idx + 1) % hdr->queue_size;
-	}
-
-	return 0;
-}
-
 static int hwsched_idle(struct adreno_device *adreno_dev)
 {
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
@@ -2193,25 +2205,17 @@ static int hwsched_idle(struct adreno_device *adreno_dev)
 	 * or pending dispatcher works on worker are
 	 * finished
 	 */
-	kthread_flush_worker(adreno_dev->scheduler_worker);
+	adreno_hwsched_flush(adreno_dev);
 
-	if (adreno_gpu_fault(adreno_dev)) {
-		ret = -EDEADLK;
+	ret = wait_for_completion_timeout(&hwsched->idle_gate,
+			msecs_to_jiffies(ADRENO_IDLE_TIMEOUT));
+	if (ret == 0) {
+		ret = -ETIMEDOUT;
+		WARN(1, "hwsched halt timeout\n");
+	} else if (ret < 0) {
+		dev_err(device->dev, "hwsched halt failed %d\n", ret);
 	} else {
-
-		ret = wait_for_completion_timeout(&hwsched->idle_gate,
-				msecs_to_jiffies(ADRENO_IDLE_TIMEOUT));
-		if (ret == 0) {
-			ret = -ETIMEDOUT;
-			WARN(1, "hwsched halt timeout\n");
-		} else if (ret < 0) {
-			dev_err(device->dev, "hwsched halt failed %d\n", ret);
-		} else {
-			ret = 0;
-		}
-
-		if (adreno_gpu_fault(adreno_dev))
-			ret = -EDEADLK;
+		ret = 0;
 	}
 
 	mutex_lock(&device->mutex);
@@ -2222,6 +2226,11 @@ static int hwsched_idle(struct adreno_device *adreno_dev)
 	 */
 	adreno_put_gpu_halt(adreno_dev);
 
+	/*
+	 * Requeue dispatcher work to resubmit pending commands
+	 * that may have been blocked due to this idling request
+	 */
+	adreno_hwsched_trigger(adreno_dev);
 	return ret;
 }
 
@@ -2243,7 +2252,7 @@ int adreno_hwsched_idle(struct adreno_device *adreno_dev)
 		return ret;
 
 	do {
-		if (adreno_gpu_fault(adreno_dev))
+		if (adreno_hwsched_gpu_fault(adreno_dev))
 			return -EDEADLK;
 
 		if (gpudev->hw_isidle(adreno_dev))
@@ -2255,7 +2264,7 @@ int adreno_hwsched_idle(struct adreno_device *adreno_dev)
 	 * without checking if the gpu is idle. check one last time before we
 	 * return failure.
 	 */
-	if (adreno_gpu_fault(adreno_dev))
+	if (adreno_hwsched_gpu_fault(adreno_dev))
 		return -EDEADLK;
 
 	if (gpudev->hw_isidle(adreno_dev))
@@ -2267,32 +2276,46 @@ int adreno_hwsched_idle(struct adreno_device *adreno_dev)
 void adreno_hwsched_register_hw_fence(struct adreno_device *adreno_dev)
 {
 	struct adreno_hwsched *hwsched = &adreno_dev->hwsched;
+	struct adreno_hw_fence *hw_fence = &hwsched->hw_fence;
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	int ret;
 
 	if (!ADRENO_FEATURE(adreno_dev, ADRENO_HW_FENCE))
 		return;
 
+	/* Enable hardware fences only if context queues are enabled */
+	if (!adreno_hwsched_context_queue_enabled(adreno_dev))
+		return;
+
 	if (test_bit(ADRENO_HWSCHED_HW_FENCE, &hwsched->flags))
 		return;
 
-	if (kgsl_hw_fence_init(device))
+	hw_fence->handle = msm_hw_fence_register(HW_FENCE_CLIENT_ID_CTX0,
+				&hw_fence->mem_descriptor);
+	if (IS_ERR_OR_NULL(hw_fence->handle)) {
+		dev_err(device->dev, "HW fences not supported: %d\n",
+			PTR_ERR_OR_ZERO(hw_fence->handle));
+		hw_fence->handle = NULL;
 		return;
+	}
 
 	/*
 	 * We need to set up the memory descriptor with the physical address of the Tx/Rx Queues so
 	 * that these buffers can be imported in to GMU VA space
 	 */
-	kgsl_memdesc_init(device, &hwsched->hw_fence_md, 0);
-	kgsl_hw_fence_populate_md(device, &hwsched->hw_fence_md);
+	kgsl_memdesc_init(device, &hw_fence->memdesc, 0);
+	hw_fence->memdesc.physaddr = hw_fence->mem_descriptor.device_addr;
+	hw_fence->memdesc.size = hw_fence->mem_descriptor.size;
+	hw_fence->memdesc.hostptr = hw_fence->mem_descriptor.virtual_addr;
 
-	ret = kgsl_memdesc_sg_dma(&hwsched->hw_fence_md, hwsched->hw_fence_md.physaddr,
-		hwsched->hw_fence_md.size);
+	ret = kgsl_memdesc_sg_dma(&hw_fence->memdesc, hw_fence->memdesc.physaddr,
+		hw_fence->memdesc.size);
 	if (ret) {
 		dev_err(device->dev, "Failed to setup HW fences memdesc: %d\n",
 			ret);
-		kgsl_hw_fence_close(device);
-		memset(&hwsched->hw_fence_md, 0x0, sizeof(hwsched->hw_fence_md));
+		msm_hw_fence_deregister(hw_fence->handle);
+		hw_fence->handle = NULL;
+		memset(&hw_fence->memdesc, 0x0, sizeof(hw_fence->memdesc));
 		return;
 	}
 
@@ -2339,15 +2362,15 @@ int adreno_hwsched_wait_ack_completion(struct adreno_device *adreno_dev,
 	if (completion_done(&ack->complete)) {
 		unprocessed++;
 		if (__ratelimit(&_rs))
-			dev_err(dev, "Ack unprocessed for id:%d sequence=%d count=%d/%d ticks=0x%llx/0x%llx\n",
+			dev_err(dev, "Ack unprocessed for id:%d sequence=%d count=%d/%d ticks=%llu/%llu\n",
 				MSG_HDR_GET_ID(ack->sent_hdr), MSG_HDR_GET_SEQNUM(ack->sent_hdr),
 				unprocessed, processed, start, end);
 		return 0;
 	}
 
-	dev_err(dev, "Ack timeout for id:%d sequence=%d ticks=0x%llx/0x%llx\n",
+	dev_err(dev, "Ack timeout for id:%d sequence=%d ticks=%llu/%llu\n",
 		MSG_HDR_GET_ID(ack->sent_hdr), MSG_HDR_GET_SEQNUM(ack->sent_hdr), start, end);
-	gmu_core_fault_snapshot(KGSL_DEVICE(adreno_dev), GMU_FAULT_WAIT_ACK_COMPLETION);
+	gmu_core_fault_snapshot(KGSL_DEVICE(adreno_dev));
 	return -ETIMEDOUT;
 }
 
@@ -2365,7 +2388,8 @@ int adreno_hwsched_ctxt_unregister_wait_completion(
 	start = gpudev->read_alwayson(adreno_dev);
 	mutex_unlock(&device->mutex);
 
-	ret = wait_for_completion_timeout(&ack->complete, msecs_to_jiffies(30 * 1000));
+	ret = wait_for_completion_timeout(&ack->complete,
+		msecs_to_jiffies(msecs_to_jiffies(30 * 1000)));
 
 	mutex_lock(&device->mutex);
 	if (ret)
@@ -2381,14 +2405,14 @@ int adreno_hwsched_ctxt_unregister_wait_completion(
 
 	if (completion_done(&ack->complete)) {
 		dev_err_ratelimited(dev,
-			"Ack unprocessed for context unregister seq: %d ctx: %u ts: %u ticks=0x%llx/0x%llx\n",
+			"Ack unprocessed for context unregister seq: %d ctx: %u ts: %u ticks=%llu/%llu\n",
 			MSG_HDR_GET_SEQNUM(ack->sent_hdr), cmd->ctxt_id,
 			cmd->ts, start, end);
 		return 0;
 	}
 
 	dev_err_ratelimited(dev,
-		"Ack timeout for context unregister seq: %d ctx: %u ts: %u ticks=0x%llx/0x%llx\n",
+		"Ack timeout for context unregister seq: %d ctx: %u ts: %u ticks=%llu/%llu\n",
 		MSG_HDR_GET_SEQNUM(ack->sent_hdr), cmd->ctxt_id, cmd->ts, start, end);
 	return -ETIMEDOUT;
 }
@@ -2404,45 +2428,6 @@ u32 adreno_hwsched_parse_payload(struct payload_section *payload, u32 key)
 	}
 
 	return 0;
-}
-
-void adreno_hwsched_log_destroy_pending_hw_fences(struct adreno_device *adreno_dev,
-	struct device *dev)
-{
-	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
-	struct adreno_hw_fence_entry entries[5];
-	struct adreno_hw_fence_entry *entry, *next;
-	struct kgsl_context *context;
-	int id, i;
-	u32 count = 0;
-
-	read_lock(&device->context_lock);
-	idr_for_each_entry(&device->context_idr, context, id) {
-		struct adreno_context *drawctxt = ADRENO_CONTEXT(context);
-
-		spin_lock(&drawctxt->lock);
-
-		list_for_each_entry_safe(entry, next, &drawctxt->hw_fence_list, node) {
-			if (count < ARRAY_SIZE(entries))
-				memcpy(&entries[count], entry, sizeof(*entry));
-			count++;
-			kgsl_hw_fence_destroy(entry->kfence);
-			adreno_hwsched_remove_hw_fence_entry(adreno_dev, entry);
-		}
-
-		spin_unlock(&drawctxt->lock);
-	}
-	read_unlock(&device->context_lock);
-
-	if (!count)
-		return;
-
-	dev_err(dev, "%d hw fences may not be signaled. %s are:\n", count,
-		count > 5 ? "First 5" : "They");
-
-	for (i = 0; (i < count) && (i < ARRAY_SIZE(entries)); i++)
-		dev_err(dev, "%d: ctx=%llu seqno=%llu\n", i, entries[i].cmd.ctxt_id,
-			entries[i].cmd.ts);
 }
 
 static void adreno_hwsched_lookup_key_value(struct adreno_device *adreno_dev,
@@ -2522,180 +2507,4 @@ bool adreno_hwsched_log_nonfatal_gpu_fault(struct adreno_device *adreno_dev,
 	}
 
 	return non_fatal;
-}
-
-int adreno_hwsched_poll_msg_queue_write_index(struct kgsl_memdesc *hfi_mem)
-{
-	struct hfi_queue_table *tbl = hfi_mem->hostptr;
-	struct hfi_queue_header *hdr = &tbl->qhdr[HFI_MSG_ID];
-	unsigned long timeout = jiffies + msecs_to_jiffies(HFI_RSP_TIMEOUT);
-
-	while (time_before(jiffies, timeout)) {
-		if (hdr->write_index != hdr->read_index)
-			goto done;
-
-		/* Wait for upto 100 us before trying again */
-		usleep_range((POLL_SLEEP_US >> 2) + 1, POLL_SLEEP_US);
-		cpu_relax();
-	}
-
-	/* Check if the write index has advanced */
-	if (hdr->write_index == hdr->read_index)
-		return -ETIMEDOUT;
-
-done:
-	/*
-	 * This is to ensure that the queue is not read speculatively before the
-	 * polling condition is evaluated.
-	 */
-	rmb();
-
-	return 0;
-}
-
-/* This function can be called while holding the drawctxt spinlock */
-void adreno_hwsched_remove_hw_fence_entry(struct adreno_device *adreno_dev,
-	struct adreno_hw_fence_entry *entry)
-{
-	struct adreno_hwsched *hwsched = &adreno_dev->hwsched;
-	struct adreno_context *drawctxt = entry->drawctxt;
-
-	atomic_dec(&hwsched->hw_fence_count);
-	drawctxt->hw_fence_count--;
-
-	dma_fence_put(&entry->kfence->fence);
-	list_del_init(&entry->node);
-	kmem_cache_free(hwsched->hw_fence_cache, entry);
-	kgsl_context_put_deferred(&drawctxt->base);
-}
-
-void adreno_hwsched_add_profile_events(struct adreno_device *adreno_dev,
-	struct kgsl_drawobj_cmd *cmdobj, struct adreno_submit_time *time)
-{
-	unsigned long flags;
-	u64 time_in_s;
-	unsigned long time_in_ns;
-	struct kgsl_drawobj *drawobj = DRAWOBJ(cmdobj);
-	struct kgsl_context *context = drawobj->context;
-	struct submission_info info = {0};
-	struct adreno_hwsched *hwsched = &adreno_dev->hwsched;
-	const struct adreno_gpudev *gpudev = ADRENO_GPU_DEVICE(adreno_dev);
-
-	if (!time)
-		return;
-
-	/*
-	 * Here we are attempting to create a mapping between the
-	 * GPU time domain (alwayson counter) and the CPU time domain
-	 * (local_clock) by sampling both values as close together as
-	 * possible. This is useful for many types of debugging and
-	 * profiling. In order to make this mapping as accurate as
-	 * possible, we must turn off interrupts to avoid running
-	 * interrupt handlers between the two samples.
-	 */
-
-	local_irq_save(flags);
-
-	/* Read always on registers */
-	time->ticks = gpudev->read_alwayson(adreno_dev);
-
-	/* Trace the GPU time to create a mapping to ftrace time */
-	trace_adreno_cmdbatch_sync(context->id, context->priority,
-		drawobj->timestamp, time->ticks);
-
-	/* Get the kernel clock for time since boot */
-	time->ktime = local_clock();
-
-	/* Get the timeofday for the wall time (for the user) */
-	ktime_get_real_ts64(&time->utime);
-
-	local_irq_restore(flags);
-
-	/* Return kernel clock time to the client if requested */
-	time_in_s = time->ktime;
-	time_in_ns = do_div(time_in_s, 1000000000);
-
-	info.inflight = hwsched->inflight;
-	info.rb_id = adreno_get_level(context);
-	info.gmu_dispatch_queue = context->gmu_dispatch_queue;
-
-	cmdobj->submit_ticks = time->ticks;
-
-	msm_perf_events_update(MSM_PERF_GFX, MSM_PERF_SUBMIT,
-		pid_nr(context->proc_priv->pid),
-		context->id, drawobj->timestamp,
-		!!(drawobj->flags & KGSL_DRAWOBJ_END_OF_FRAME));
-	trace_adreno_cmdbatch_submitted(drawobj, &info, time->ticks,
-		(unsigned long) time_in_s, time_in_ns / 1000, 0);
-
-	log_kgsl_cmdbatch_submitted_event(context->id, drawobj->timestamp,
-			context->priority, drawobj->flags);
-}
-
-int adreno_gmu_context_queue_write(struct adreno_device *adreno_dev,
-	struct kgsl_memdesc *gmu_context_queue, u32 *msg, u32 size_bytes,
-	struct kgsl_drawobj *drawobj, struct adreno_submit_time *time)
-{
-	struct gmu_context_queue_header *hdr = gmu_context_queue->hostptr;
-	const struct adreno_gpudev *gpudev = ADRENO_GPU_DEVICE(adreno_dev);
-	u32 *queue = gmu_context_queue->hostptr + sizeof(*hdr);
-	u32 i, empty_space, write_idx = hdr->write_index, read_idx = hdr->read_index;
-	u32 size_dwords = size_bytes >> 2;
-	u32 align_size = ALIGN(size_dwords, SZ_4);
-	u32 id = MSG_HDR_GET_ID(*msg);
-	struct kgsl_drawobj_cmd *cmdobj = NULL;
-
-	empty_space = (write_idx >= read_idx) ?
-			(hdr->queue_size - (write_idx - read_idx))
-			: (read_idx - write_idx);
-
-	if (empty_space <= align_size)
-		return -ENOSPC;
-
-	if (!IS_ALIGNED(size_bytes, sizeof(u32)))
-		return -EINVAL;
-
-	for (i = 0; i < size_dwords; i++) {
-		queue[write_idx] = msg[i];
-		write_idx = (write_idx + 1) % hdr->queue_size;
-	}
-
-	/* Cookify any non used data at the end of the write buffer */
-	for (; i < align_size; i++) {
-		queue[write_idx] = 0xfafafafa;
-		write_idx = (write_idx + 1) % hdr->queue_size;
-	}
-
-	/* Ensure packet is written out before proceeding */
-	wmb();
-
-	if (!drawobj)
-		goto done;
-
-	if (drawobj->type & SYNCOBJ_TYPE) {
-		struct kgsl_drawobj_sync *syncobj = SYNCOBJ(drawobj);
-
-		trace_adreno_syncobj_submitted(drawobj->context->id, drawobj->timestamp,
-			syncobj->num_hw_fence, gpudev->read_alwayson(adreno_dev));
-		goto done;
-	}
-
-	cmdobj = CMDOBJ(drawobj);
-
-	adreno_hwsched_add_profile_events(adreno_dev, cmdobj, time);
-
-	/*
-	 * Put the profiling information in the user profiling buffer.
-	 * The hfi_update_write_idx below has a wmb() before the actual
-	 * write index update to ensure that the GMU does not see the
-	 * packet before the profile data is written out.
-	 */
-	adreno_profile_submit_time(time);
-
-done:
-	trace_kgsl_hfi_send(id, size_dwords, MSG_HDR_GET_SEQNUM(*msg));
-
-	hfi_update_write_idx(&hdr->write_index, write_idx);
-
-	return 0;
 }

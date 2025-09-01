@@ -107,12 +107,16 @@ int kgsl_hwlock(struct cpu_gpu_lock *lock);
 void kgsl_hwunlock(struct cpu_gpu_lock *lock);
 
 /**
- * kgsl_genpd_is_enabled - Check whether genpd is enabled or not
- * @dev: Power domain handle
+ * kgsl_regulator_disable_wait - Disable a regulator and wait for it
+ * @reg: A &struct regulator handle
+ * @timeout: Time to wait (in milliseconds)
  *
- * Return: True if genpd is enabled otherwise false.
+ * Disable the regulator and wait @timeout milliseconds for it to enter the
+ * disabled state.
+ *
+ * Return: True if the regulator was disabled or false if it timed out
  */
-bool kgsl_genpd_is_enabled(struct device *dev);
+bool kgsl_regulator_disable_wait(struct regulator *reg, u32 timeout);
 
 /**
  * kgsl_of_clk_by_name - Return a clock device for a given name

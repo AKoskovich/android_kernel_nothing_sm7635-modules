@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/of.h>
@@ -91,7 +91,8 @@ static void kgsl_snapshot_put_object(struct kgsl_snapshot_object *obj)
 {
 	list_del(&obj->node);
 
-	CLEAR_FLAG(KGSL_MEMDESC_FROZEN | KGSL_MEMDESC_SKIP_RECLAIM, &obj->entry->memdesc.priv);
+	obj->entry->memdesc.priv &= ~KGSL_MEMDESC_FROZEN;
+	obj->entry->memdesc.priv &= ~KGSL_MEMDESC_SKIP_RECLAIM;
 	kgsl_mem_entry_put(obj->entry);
 
 	kfree(obj);
@@ -189,7 +190,6 @@ int kgsl_snapshot_get_object(struct kgsl_snapshot *snapshot,
 	mem_type = kgsl_memdesc_get_memtype(&entry->memdesc);
 	if (mem_type == KGSL_MEMTYPE_TEXTURE ||
 		mem_type == KGSL_MEMTYPE_EGL_SURFACE ||
-		mem_type == KGSL_MEMTYPE_SURFACE ||
 		mem_type == KGSL_MEMTYPE_EGL_IMAGE) {
 		ret = 0;
 		goto err_put;
@@ -261,14 +261,14 @@ int kgsl_snapshot_get_object(struct kgsl_snapshot *snapshot,
 	 * 0 so it doesn't get counted twice
 	 */
 
-	ret = (TEST_FLAG(KGSL_MEMDESC_FROZEN, &entry->memdesc.priv)) ? 0
+	ret = (entry->memdesc.priv & KGSL_MEMDESC_FROZEN) ? 0
 		: entry->memdesc.size;
 
-	SET_FLAG(KGSL_MEMDESC_FROZEN, &entry->memdesc.priv);
+	entry->memdesc.priv |= KGSL_MEMDESC_FROZEN;
 
 	return ret;
 err_put:
-	CLEAR_FLAG(KGSL_MEMDESC_SKIP_RECLAIM, &entry->memdesc.priv);
+	entry->memdesc.priv &= ~KGSL_MEMDESC_SKIP_RECLAIM;
 	kgsl_mem_entry_put(entry);
 	return ret;
 }
@@ -921,10 +921,9 @@ static ssize_t force_panic_show(struct kgsl_device *device, char *buf)
 static ssize_t force_panic_store(struct kgsl_device *device, const char *buf,
 	size_t count)
 {
-	int ret;
-
-	ret = kstrtobool(buf, &device->force_panic);
-	return ret ? ret : count;
+	if (strtobool(buf, &device->force_panic))
+		return -EINVAL;
+	return count;
 }
 
 /* Show the break_ib request status */
@@ -955,10 +954,10 @@ static ssize_t prioritize_unrecoverable_show(
 static ssize_t prioritize_unrecoverable_store(
 		struct kgsl_device *device, const char *buf, size_t count)
 {
-	int ret;
+	if (strtobool(buf, &device->prioritize_unrecoverable))
+		return -EINVAL;
 
-	ret = kstrtobool(buf, &device->prioritize_unrecoverable);
-	return ret ? ret : count;
+	return count;
 }
 
 /* Show the snapshot_crashdumper request status */
@@ -972,10 +971,9 @@ static ssize_t snapshot_crashdumper_show(struct kgsl_device *device, char *buf)
 static ssize_t snapshot_crashdumper_store(struct kgsl_device *device,
 	const char *buf, size_t count)
 {
-	int ret;
-
-	ret = kstrtobool(buf, &device->snapshot_crashdumper);
-	return ret ? ret : count;
+	if (strtobool(buf, &device->snapshot_crashdumper))
+		return -EINVAL;
+	return count;
 }
 
 /* Show the timestamp of the last collected snapshot */
@@ -997,10 +995,10 @@ static ssize_t snapshot_legacy_show(struct kgsl_device *device, char *buf)
 static ssize_t snapshot_legacy_store(struct kgsl_device *device,
 	const char *buf, size_t count)
 {
-	int ret;
+	if (strtobool(buf, &device->snapshot_legacy))
+		return -EINVAL;
 
-	ret = kstrtobool(buf, &device->snapshot_legacy);
-	return ret ? ret : count;
+	return count;
 }
 
 static struct bin_attribute snapshot_attr = {
